@@ -1,0 +1,15 @@
+{
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "codespaces": {
+      "repositories": {
+        "extensible-internet/ei": {
+          "permissions": "read-all"
+        }
+      }
+    }
+  },
+  "postCreateCommand": ".devcontainer/postCreateCommand.sh"
+}
