@@ -1,5 +1,11 @@
 # NB: enable ipv6 in Docker daemon, or tests will fail
 #     https://docs.docker.com/config/daemon/ipv6
+#
+# /etc/docker/daemon.json:
+# {
+#   "ipv6": true,
+#   "fixed-cidr-v6": "fd00::/80"
+# }
 FROM ubuntu:22.04
 
 ARG USER=groove
