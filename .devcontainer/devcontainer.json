@@ -6,10 +6,13 @@
     "codespaces": {
       "repositories": {
         "extensible-internet/ei": {
-          "permissions": "read-all"
+          "permissions" {
+            "contents": "read"
+          }
         }
       }
     }
   },
+  "onCreateCommand": ".devcontainer/onCreateCommand.sh",
   "postCreateCommand": ".devcontainer/postCreateCommand.sh"
 }

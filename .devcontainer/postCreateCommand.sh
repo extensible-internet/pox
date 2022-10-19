@@ -1,7 +1,4 @@
 #/usr/bin/env bash
 
-cd ext
-git clone -b groove https://github.com/extensible-internet/ei.git
-
-cd ei
+cd ext/ei
 scripts/build_all.sh --install --with-tests --clean --parallel
