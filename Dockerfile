@@ -34,7 +34,7 @@ RUN apt-get update && \
           cmake-curses-gui \
           python3-tblib \
           linux-tools-generic \
-          linux-headers-$(uname -r) \
+        #   linux-headers-$(uname -r) \
           tcpdump \
           atop \
           python3-kazoo \
@@ -49,4 +49,5 @@ ENV PATH="/home/$USER/.local/bin:$PATH"
 WORKDIR /home/$USER
 COPY --chown=$USER:$USER . pox
 WORKDIR pox/ext/ei
-RUN scripts/build_all.sh --install --with-tests --clean --parallel
+# RUN scripts/build_all.sh --install --with-tests --clean --parallel
+# ENTRYPOINT ["/bin/bash"]

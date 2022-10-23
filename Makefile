@@ -17,3 +17,7 @@ two_clients_test:
 delete:
 	docker stop dev_pox
 	docker rm dev_pox
+
+build_prod_docker:
+	docker build . -t vikranth/prod_pox -f Dockerfile
+	docker push vikranth/prod_pox:latest
