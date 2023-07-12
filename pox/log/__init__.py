@@ -14,8 +14,98 @@
 
 import logging
 from logging.handlers import *
+import traceback
+import json
 
 _formatter = logging.Formatter(logging.BASIC_FORMAT)
+
+
+class TextSocketHandler (SocketHandler):
+  _initted = False
+
+  def __init__ (self, host, port, *args, **kw):
+    super().__init__(host, port)
+    self._args = (args,kw)
+
+  def _init (self, color=False, entire=False, autolevels=False):
+    # This needs to be called later, once other log stuff has happened
+    self._initted = True
+    if color:
+      old_format = self.formatter.format
+      from log.color import _proc, _color, LEVEL_COLORS
+      # This is mostly taken from log.color
+      if entire:
+        def new_format (record):
+          msg = _proc(old_format(record), record.levelname)
+          color = LEVEL_COLORS.get(record.levelname)
+          if color is None:
+            return msg
+          return _color(color, msg)
+      else:
+        def new_format (record):
+          color = LEVEL_COLORS.get(record.levelname)
+          oldlevelname = record.levelname
+          if (color is not None) and autolevels:
+            record.levelname = "@@@level" + record.levelname + "@@@reset"
+          r = _proc(old_format(record), oldlevelname)
+          record.levelname = oldlevelname
+          return r
+      self.formatter.format = new_format
+
+  def makePickle (self, record):
+    if not self._initted: self._init(*self._args[0], **self._args[1])
+    return self.formatter.format(record).encode() + b'\n'
+
+
+class JSONSocketHandler (SocketHandler):
+  _attributes = [
+    'created','filename','funcName','levelname','levelno','lineno',
+    'module','msecs','name','pathname','process','processName',
+    'relativeCreated','thread','threadName','args','asctime',
+  ]
+
+  def __init__ (self, host, port, nl=True, full=False, attrs="", xattrs=""):
+    super().__init__(host, port)
+    if not full and not attrs and not xattrs:
+      attrs = 'levelname levelno name'
+
+    self._attributes = list(self._attributes)
+
+    if attrs:
+      attrs = attrs.strip().replace(","," ").replace(":"," ").split()
+      self._attributes = []
+      for x in attrs:
+        assert x in JSONSocketHandler._attributes,x
+        self._attributes.append(x)
+    if xattrs:
+      xattrs = xattrs.replace(","," ").replace(":"," ").split()
+      for x in xattrs:
+        if x in self._attributes:
+          self._attributes.remove(x)
+
+    self._asctime = False
+    if 'asctime' in self._attributes:
+      self._attributes.remove('asctime')
+      self._asctime = True
+
+    self._sep = b''
+    if nl: self._sep = b'\n'
+
+  def makePickle (self, record):
+    # This is based on messenger.log_service
+    o = {'message' : self.format(record)}
+    #o['message'] = record.getMessage()
+    for attr in self._attributes:
+      o[attr] = getattr(record, attr)
+    if self._asctime:
+      o['asctime'] = self.formatter.formatTime(record) #, self._dateFormat)
+    if record.exc_info:
+      o['exc_info'] = [str(record.exc_info[0]),
+                       str(record.exc_info[1]),
+                       traceback.format_tb(record.exc_info[2],1)]
+      o['exc'] = traceback.format_exception(*record.exc_info)
+    return json.dumps(o).encode() + self._sep
+
 
 def _parse (s):
   if s.lower() == "none": return None
@@ -121,6 +211,10 @@ def launch (__INSTANCE__ = None, **kw):
       standard(use_kw, v, TimedRotatingFileHandler)
     elif k == "socket":
       standard(use_kw, v, SocketHandler)
+    elif k == "textsocket":
+      standard(use_kw, v, TextSocketHandler)
+    elif k == "jsonsocket":
+      standard(use_kw, v, JSONSocketHandler)
     elif k == "datagram":
       standard(use_kw, v, DatagramHandler)
     elif k == "syslog":
