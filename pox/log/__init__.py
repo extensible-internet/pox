@@ -1,4 +1,4 @@
-# Copyright 2011 James McCauley
+# Copyright 2011,2023 James McCauley
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -61,15 +61,22 @@ def launch (__INSTANCE__ = None, **kw):
   it is used for the default logger.
   If a --format is specified, you can also specify a --datefmt="<str>"
   where the string is a strftime format string for date/time stamps.
+  If --format is specified without a parameter, the format from the default
+  logger is used.
   """
 
   if 'format' in kw:
-    df = kw.pop("datefmt", None)
+    import pox.core
+    df = None
+    if kw['format'] is True:
+      kw['format'] = pox.core._default_log_handler.formatter._fmt # Hacky
+      df = pox.core._default_log_handler.formatter.datefmt
+    df = kw.pop("datefmt", df)
+    if not df: df = None
     formatter = logging.Formatter(kw['format'], datefmt=df)
     del kw['format']
     if len(kw) == 0:
       # Use for the default logger...
-      import pox.core
       pox.core._default_log_handler.setFormatter(formatter)
   else:
     formatter = _formatter
