@@ -45,7 +45,7 @@ Enter name and value to add an A or CNAME record.
 <br/>
 Enter name only to delete a record.
 
-<form method="POST" action="/dns">
+<form method="POST">
 <input id="form_name" name="dns_name">
 <input id="form_value" name="dns_value">
 <input type="submit">
@@ -115,7 +115,7 @@ class DNSWebHandler (InternalContentHandler):
 
 def launch ():
   def config ():
-    core.WebServer.set_handler("/dns", DNSWebHandler,
+    core.WebServer.set_handler("/dns/", DNSWebHandler,
                                args = dict(_dns=core.DNSServer))
 
   core.call_when_ready(config, ["WebServer", "DNSServer"])

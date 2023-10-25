@@ -1216,7 +1216,7 @@ def upload_test (save=False):
       return ret
   handler = SaveUploader if save else FileUploadHandler
 
-  core.WebServer.set_handler("/upload_test", handler)
+  core.WebServer.set_handler("/upload_test/", handler)
 
 
 def launch (address='', port=8000, static=False, ssl_server_key=None,
@@ -1269,18 +1269,18 @@ def launch (address='', port=8000, static=False, ssl_server_key=None,
                               ssl_client_certs=ssl_client_certs)
   core.register("WebServer", httpd)
   httpd.set_handler("/", CoreHandler, httpd, True)
-  #httpd.set_handler("/foo", StaticContentHandler, {'root':'.'}, True)
-  #httpd.set_handler("/f", StaticContentHandler, {'root':'pox'}, True)
-  #httpd.set_handler("/cgis", SplitCGIRequestHandler, "pox/web/www_root")
+  #httpd.set_handler("/foo/", StaticContentHandler, {'root':'.'}, True)
+  #httpd.set_handler("/f/", StaticContentHandler, {'root':'pox'}, True)
+  #httpd.set_handler("/cgis/", SplitCGIRequestHandler, "pox/web/www_root")
   if static is True:
-    httpd.add_static_dir('static', 'www_root', relative=True)
+    httpd.add_static_dir('static/', 'www_root', relative=True)
   elif static is False:
     pass
   else:
     static = static.split(",")
     for entry in static:
       if entry.lower() == "":
-        httpd.add_static_dir('static', 'www_root', relative=True)
+        httpd.add_static_dir('static/', 'www_root', relative=True)
         continue
       if ':' not in entry:
         directory = entry

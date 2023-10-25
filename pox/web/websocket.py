@@ -562,6 +562,6 @@ def log_service ():
     docs = {'/': _log_page.replace("SERVER_ADDRESS", "%s:%s" % tuple(addr)),
             '/help.txt': _log_help_page}
 
-    core.WebServer.set_handler("/wslog/ws", LogWebsocketHandler)
-    core.WebServer.set_handler("/wslog", InternalContentHandler, docs)
+    core.WebServer.set_handler("/wslog/ws/", LogWebsocketHandler)
+    core.WebServer.set_handler("/wslog/", InternalContentHandler, docs)
   core.call_when_ready(ready, ("WebServer",), "log_websocket")
