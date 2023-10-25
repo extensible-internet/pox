@@ -171,6 +171,7 @@ class DNSServer (object):
 
   def _get (self, name, qtype):
     if isinstance(name, bytes): name = name.decode("ascii")
+    name = name.lower()
     rs = [x for x in self.db.get(name, []) if x.type == qtype]
     if not rs: return None
     return rs[0]
@@ -240,7 +241,7 @@ class DNSServer (object):
       if self.default_suffix:
         n = n + "." + self.default_suffix.lstrip(".")
     if not self.is_valid_name(n): return None
-    return n
+    return n.lower()
 
   def del_record (self, name, qtype=None):
     name = self._fixname(name)
