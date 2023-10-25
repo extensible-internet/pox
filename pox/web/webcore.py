@@ -854,8 +854,8 @@ class SplitterRequestHandler (BaseHTTPRequestHandler, BasicAuthMixin,
 
   def _check_basic_auth (self, user, password):
     if self.basic_auth_info.get(user) == password: return True
-    import web.authentication
-    web.authentication.log.warn("Authentication failure")
+    from .authentication import log as authlog
+    authlog.warn(f"Authentication failure for user '{_safestr(user)}'")
     return False
 
   def _get_auth_realm (self):
