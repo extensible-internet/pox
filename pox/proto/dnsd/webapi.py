@@ -113,7 +113,8 @@ class DNSWebAPIHandler (InternalContentHandler):
     # "ip" will definitely get set to either "myip" or "myip6" or the client
     # IP address.  If "myip" *and* "myip6" are set, then ip6 is also set.
     if (not ip) and (not ip6):
-      ip = self.client_address[0]
+      ip = self.headers.get("x-forwarded-for", self.client_address[0])
+      ip = "".join(filter(lambda x: x in set("0123456789.:"), ip))
     if (not ip) and ip6:
       ip = ip6
       ip6 = None

@@ -136,8 +136,10 @@ class DNSWebHandler (InternalContentHandler):
           r += f"<td>{alpn}</td><td>{v.ttl}</td></tr>"
           o.append(r)
 
+      yourip = self.headers.get("x-forwarded-for", self.client_address[0])
+      yourip = "".join(filter(lambda x: x in set("0123456789.:"), yourip))
       more = ('<br/>Your IP is: <span onclick="onclick_myip()" id="myip"><tt>'
-              + self.client_address[0] + "</tt></span>\n<br/>")
+              + yourip + "</tt></span>\n<br/>")
 
       footer = _footer
       footer = footer.replace("$ALPN_DISPLAY",
