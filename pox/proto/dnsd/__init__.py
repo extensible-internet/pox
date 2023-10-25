@@ -158,6 +158,11 @@ class DNSRecord (object):
 
 
 class DNSServer (object):
+  counter_badclass = 0
+  counter_norecord = 0
+  counter_novalue  = 0
+  counter_okay     = 0
+
   def __init__ (self, bind_ip=None, default_suffix=None, udp=True, doh=None):
     self.log = log
     self.db = {}
@@ -350,7 +355,10 @@ class DNSServer (object):
     self.log.debug("< %s (from %s)", req, _fa(addr))
 
   def _do_question (self, sock, addr, data, req, q, res):
-    if q.qclass != 1: return # Only IN
+    if q.qclass != 1:
+      # Only IN
+      self.counter_badclass += 1
+      return
     self._note_request(sock, addr, data, req, q)
 
     res.questions.append(q)
@@ -375,7 +383,13 @@ class DNSServer (object):
       # hint!
       self.log.info("No such domain: %s (from %s)",
                     q.name.decode("utf8", errors="ignore"), _fa(addr))
+      self.counter_norecord += 1
     else:
+      if not rec.values:
+        self.counter_novalue += 1
+      else:
+        self.counter_okay += 1
+
       for value in rec.values:
         rr = RR(q.name, rec.type, 1, rec.ttl, 0, value)
         res.answers.append(rr)
