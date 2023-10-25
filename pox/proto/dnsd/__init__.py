@@ -130,6 +130,9 @@ class DNSServer (object):
 
     log.debug("< %s (from %s)", req, addr)
     log.debug("> %s", r)
+    self._finish_request(sock, addr, data, r)
+
+  def _finish_request (self, sock, addr, data, r):
     sock.sendto(r.pack(), addr)
 
   def _server_thread (self):
