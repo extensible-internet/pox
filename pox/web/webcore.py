@@ -194,7 +194,7 @@ class POXCookieGuardMixin (object):
   send it.
   """
 
-  _pox_cookieguard_bouncer = "/_poxcookieguard/bounce"
+  _pox_cookieguard_bouncer = "?/_POXCookieGuard&Bounce_"
   _pox_cookieguard_secret = _gen_cgc()
   _pox_cookieguard_cookie_name = POX_COOKIEGUARD_DEFAULT_COOKIE_NAME
   _pox_cookieguard_consume_post = True
@@ -229,8 +229,11 @@ class POXCookieGuardMixin (object):
     self.wfile.write(("""
       <html><head><title>POX CookieGuard</title></head>
       <body>
-      A separate site has linked you here.  If this was intentional,
-      please <a href="%s">continue to %s</a>.
+      The expected guard cookie has not been set.  If you are intentionally
+      visiting this page, you can try to <a href="%s">continue to %s</a>.
+      <br/>
+      If you have already tried the link above, the most likely problem is
+      that your browser (or other client) does not support cookies.
       </body>
       </html>
       """ % (target, cgi_escape(target))).encode())
@@ -252,8 +255,7 @@ class POXCookieGuardMixin (object):
                         self._get_cookieguard_cookie(),
                         self._get_cookieguard_cookie_path(requested)))
 
-    self.send_header("Location", self._pox_cookieguard_bouncer + "?"
-                                 + quote_plus(requested))
+    self.send_header("Location", requested + self._pox_cookieguard_bouncer)
     self.end_headers()
 
   def _do_cookieguard (self, override=None):
@@ -266,13 +268,13 @@ class POXCookieGuardMixin (object):
     cookies = SimpleCookie(self.headers.get('Cookie'))
     cgc = cookies.get(self._pox_cookieguard_cookie_name)
     if cgc and cgc.value == self._get_cookieguard_cookie():
-      if requested.startswith(self._pox_cookieguard_bouncer + "?"):
+      if requested.endswith(self._pox_cookieguard_bouncer):
         log.debug("POX CookieGuard cookie is valid -- bouncing")
-        qs = requested.split("?",1)[1]
+        loc = requested.removesuffix(self._pox_cookieguard_bouncer)
 
         self._cookieguard_maybe_consume_post()
         self.send_response(307, "Temporary Redirect")
-        self.send_header("Location", unquote_plus(qs))
+        self.send_header("Location", loc)
         self.end_headers()
         return False
 
@@ -280,17 +282,14 @@ class POXCookieGuardMixin (object):
       return True
     else:
       # No guard cookie or guard cookie is wrong
-      if requested.startswith(self._pox_cookieguard_bouncer + "?"):
+      if requested.endswith(self._pox_cookieguard_bouncer):
         # Client probably didn't save cookie
-        qs = requested.split("?",1)[1]
-        target = unquote_plus(qs)
-        bad_qs = quote_plus(target) != qs
-        if bad_qs or self.command != "GET":
+        target = requested.removesuffix(self._pox_cookieguard_bouncer)
+        if self.command != "GET":
           log.warn("Bad POX CookieGuard bounce; possible attack "
-                   "(method:%s cookie:%s qs:%s)",
+                   "(method:%s cookie:%s)",
                    self.command,
-                   "bad" if cgc else "missing",
-                   "bad" if bad_qs else "okay")
+                   "bad" if cgc else "missing")
           self.send_response(400, "Bad Request")
           self.end_headers()
           return False
