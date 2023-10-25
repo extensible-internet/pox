@@ -51,9 +51,8 @@ def _load_oui_names ():
       oui_name = ' '.join(end)
       _eth_oui_to_name[oui] = oui_name.strip()
   except:
-    raise
     import logging
-    logging.getLogger().warn("Could not load OUI list")
+    logging.getLogger("addresses").warn("Could not load OUI list")
   if f: f.close()
 _load_oui_names()
 
