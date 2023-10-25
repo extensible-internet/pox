@@ -1,4 +1,4 @@
-# Copyright 2011,2012 James McCauley
+# Copyright 2011,2012,2023 James McCauley
 # Copyright 2008 (C) Nicira, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -107,8 +107,8 @@ def _bytes (b):
 
 
 rrtype_to_str = {
-   1: "A",  # host address
-   2: "NS", #an authoritative name server
+   1: "A",         # host address
+   2: "NS",        # an authoritative name server
    3: "MD",        # a mail destination (Obsolete - use MX)
    4: "MF",        # a mail forwarder (Obsolete - use MX)
    5: "CNAME",     # the canonical name for an alias
@@ -123,7 +123,9 @@ rrtype_to_str = {
    14: "MINFO",    # mailbox or mail list information
    15: "MX"   ,    # mail exchange
    16: "TXT",      # text strings
-   28: "AAAA" # IPV6 address request
+   28: "AAAA",     # IPV6 address request
+   64: "SVCB",     # Per draft-ietf-dnsop-svcb-https-12
+   65: "HTTPS",    # Like SVCB
 }
 
 rrclass_to_str = {
@@ -146,6 +148,14 @@ class dns(packet_base):
     SERVER_PORT = 53
     MDNS_PORT   = 5353
     MIN_LEN     = 12
+
+    # Service Parameter Keys (SvcParamKeys) for SVCB
+    SVCPK_ALPN            = 1
+    SVCPK_NO_DEFAULT_ALPN = 2
+    SVCPK_PORT            = 3
+    SVCPK_IPV4HINT        = 4
+    SVCPK_ECH             = 5
+    SVCPK_IPV6HINT        = 6
 
     def __init__(self, raw=None, prev=None, **kw):
         packet_base.__init__(self)
@@ -255,6 +265,21 @@ class dns(packet_base):
           elif r.qtype == 28: # AAAA
             assert isinstance(r.rddata, IPAddr6)
             return s + r.rddata.raw
+          elif r.qtype == 64 or r.qtype == 65: # SVCB/HTTPS
+            assert isinstance(r.rddata, (tuple,list))
+            priority,target,params = r.rddata
+            d = struct.pack("!H", priority)
+            d += makeName(target, False)
+            if not d.endswith(b'\x00'): d += b'\x00'
+            if isinstance(params, dict):
+              params = params.items()
+            for k,v in params:
+              if isinstance(v, str):
+                v = _bytes(v)
+              elif hasattr(v, 'pack'):
+                v = v.pack()
+              d += struct.pack("!HH", k, len(v)) + v
+            return s + d
           else:
             return s + r.rddata
 
@@ -457,6 +482,31 @@ class dns(packet_base):
         elif type == 15:
             #TODO: Save priority (don't just jump past it)
             return self.read_dns_name_from_index(l, beg_index + 2)[1]
+        # SVCB/HTTPS
+        elif type == 64 or type == 65:
+            priority = struct.unpack("!H", l[beg_index : beg_index + 2])[0]
+            lo,target = self.read_dns_name_from_index(l, beg_index + 2)
+            rawparams = l[lo:]
+            params = []
+
+            if rawparams:
+                lo = 0
+                while lo < len(rawparams):
+                    key = struct.unpack("!H", rawparams[lo:lo+2])[0]
+                    lo += 2
+                    vallen = struct.unpack("!H", rawparams[lo:lo+2])[0]
+                    lo += 2
+                    val = rawparams[lo:lo+vallen]
+                    if len(val) != vallen:
+                        raise RuntimeError("Bad SvcParams; length is wrong")
+                    if params and params[-1][0] >= key:
+                        raise RuntimeError("Bad SvcParams; keys not ascending")
+                    lo += vallen
+                    params.append( (key,val) )
+                assert lo == len(rawparams)
+            params = dict(params)
+
+            return (priority,target,params)
         else:
             return l[beg_index : beg_index + dlen]
 
@@ -512,14 +562,29 @@ class dns(packet_base):
         MX_TYPE    = 15
         TXT_TYPE   = 16
         AAAA_TYPE  = 28
+        SVCB_TYPE  = 64
+        HTTPS_TYPE = 65
 
-        def __init__ (self, _name, _qtype, _qclass, _ttl, _rdlen, _rddata):
-            self.name   = _name
-            self.qtype  = _qtype
-            self.qclass = _qclass
-            self.ttl    = _ttl
-            self.rdlen  = _rdlen
-            self.rddata = _rddata
+        def __init__ (self, name, qtype, qclass, ttl,
+                      rdlen=None, rddata=False):
+            self.name   = name
+            self.qtype  = qtype
+            self.qclass = qclass
+            self.ttl    = ttl
+            self._rdlen  = rdlen
+            self.rddata = rddata
+
+        @property
+        def rdlen (self):
+          if self._rdlen is not None: return self._rdlen
+          if isinstance(self.rddata, (bytes,str)):
+            return len(self.rddata)
+          return 0
+          #raise RuntimeError("rdlen not set")
+
+        @rdlen.setter
+        def rdlen (self, value):
+          self._rdlen = value
 
         def __str__ (self):
             s = _str(self.name)
@@ -535,7 +600,14 @@ class dns(packet_base):
             s += " rdlen:"+ _str(self.rdlen)
             s += " datalen:" + _str(len(self.rddata))
             if len(self.rddata) == 4:
-              #FIXME: can be smarter about whether this is an IP
-              s+= " data:" + _str(IPAddr(self.rddata))
+                #FIXME: can be smarter about whether this is an IP
+                s+= " data:" + _str(IPAddr(self.rddata))
 
             return s
+
+
+def _initialize ():
+  for num,name in rrclass_to_str.items():
+    if num >= 255: continue
+    setattr(dns, f"{name}_CLASS", num)
+_initialize()
