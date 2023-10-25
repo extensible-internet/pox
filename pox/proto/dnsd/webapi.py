@@ -49,6 +49,14 @@ POX CookieGuard does not work.  You can set --no-cookieguard for
 this module, which disables it for just the DNS web API.  If you
 use the POX web server for other things, however, this means the
 DNS database may be vulnerable to spoofed entries via CSRF.
+
+The API also supports a couple of extensions to the usual API:
+  ttl - lets users specify the desired TTL for the entry
+  alpn - lets users specify an ALPN for synthetic HTTPS records
+         (the meaning is the same as in the DNSd web UI)
+
+These extensions may need to be enabled when launching the API
+component (with, e.g., --allow-alpn).  See the launcher doc.
 """
 
 from pox.core import core
@@ -61,6 +69,13 @@ log = core.getLogger()
 
 class DNSWebAPIHandler (InternalContentHandler):
   args_content_lookup = False
+
+  dns_allow_alpn = False
+  dns_default_alpn = None
+  dns_allow_ttl = False
+  dns_default_ttl = None
+
+  dns_min_ttl = 0
 
   @property
   def _dns (self):
@@ -80,6 +95,21 @@ class DNSWebAPIHandler (InternalContentHandler):
     ip = qs.get("myip", None)
     ip6 = qs.get("myip6", None)
 
+    alpn = self.dns_default_alpn
+    t = qs.get("alpn", None)
+    if self.dns_allow_alpn and t is not None: alpn = t
+
+    ttl = self.dns_default_ttl
+    t = qs.get("ttl", None)
+    if self.dns_allow_ttl and t is not None: ttl = t
+    try:
+      if ttl is not None:
+        ttl = int(ttl)
+        if ttl < self.dns_min_ttl: ttl = dns_min_ttl
+    except Exception:
+      log.error(f"Bad TTL processing hostname {hn}")
+      return ("text/plain", "dnserror") # Random error
+
     # "ip" will definitely get set to either "myip" or "myip6" or the client
     # IP address.  If "myip" *and* "myip6" are set, then ip6 is also set.
     if (not ip) and (not ip6):
@@ -91,9 +121,9 @@ class DNSWebAPIHandler (InternalContentHandler):
     if ip6:
       # Do a bonus IPv6 update, which won't influence the output at all
       # (it will work or it won't; life is mysterious).
-      self._update(hn, ip6)
+      self._update(hn, ip6, alpn=alpn, ttl=ttl)
 
-    return self._update(hn, ip)
+    return self._update(hn, ip, alpn=alpn, ttl=ttl)
 
     # Some of the errors:
     #  badauth
@@ -106,7 +136,7 @@ class DNSWebAPIHandler (InternalContentHandler):
     # Who knows we if we use them right, but if you
     # get one, something has definitely gone wrong.
 
-  def _update (self, hn, ip):
+  def _update (self, hn, ip, alpn, ttl):
     if not hn: return ("text/plain", "nohost")
 
     try:
@@ -122,7 +152,7 @@ class DNSWebAPIHandler (InternalContentHandler):
 
     try:
       for h in hn:
-        self._dns.add_record(h, ip)
+        self._dns.add_record(h, ip, ttl=ttl, https_alpn=alpn)
     except Exception:
       log.exception("While adding %s -> %s", h, ip)
       return ("text/plain", "dnserr")
@@ -130,12 +160,29 @@ class DNSWebAPIHandler (InternalContentHandler):
     return ("text/plain", "good " + str(ip))
 
 
-def launch (no_cookieguard=False):
+def launch (no_cookieguard=False, allow_ttl=False, allow_alpn=False,
+            default_ttl=None, default_alpn=None, minimum_ttl=0):
+  """
+  Launch the web API
+
+  allow_ttl:    Allow web API to set TTL of new entries
+  allow_alpn:   Allow web API to enable synthetic HTTPS records by setting
+                the desired ALPN (see ALPN docs elsewhere in POX's dnsd)
+  default_ttl:  Set a default TTL different than the DNS server's default
+  default_alpn: Set a default ALPN for all added records
+  minimum_ttl:  Set a minimum value for user-specified TTL
+  """
   class Handler (DNSWebAPIHandler):
     pass
 
   if no_cookieguard:
     Handler.pox_cookieguard = False
+
+  Handler.dns_allow_ttl = allow_ttl
+  Handler.dns_allow_alpn = allow_alpn
+  Handler.dns_default_ttl = default_ttl
+  Handler.dns_default_alpn = default_alpn
+  Handler.dns_min_ttl = minimum_ttl
 
   def config ():
     core.WebServer.set_handler("/nic/", Handler,
