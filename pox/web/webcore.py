@@ -862,9 +862,6 @@ class SplitterRequestHandler (BaseHTTPRequestHandler, BasicAuthMixin,
     authlog.warn(f"Authentication failure for user '{_safestr(user)}'")
     return False
 
-  def _get_auth_realm (self):
-    return "POX"
-
   def handle_one_request(self):
     _shutdown_helper.register(self.connection)
     self.raw_requestline = self.rfile.readline()

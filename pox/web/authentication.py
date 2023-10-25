@@ -41,6 +41,12 @@ log = core.getLogger()
 
 
 
+def _get_splitter ():
+  from pox.web.webcore import SplitterRequestHandler
+  return SplitterRequestHandler
+
+
+
 class BasicAuthMixin (object):
   """
   Mixin for adding HTTP Basic authentication
@@ -104,6 +110,13 @@ class BasicAuthMixin (object):
       try:
         return ' '.join(self.prefix.replace('"', '').split())
       except Exception:
+        if isinstance(self, _get_splitter()):
+          # Ugly special case for SplitterRequestHandler
+          r = self.path
+          if r.startswith('/'): r = r[1:]
+          r = r.split("/", 1)[0]
+          if r: r = "_" + r
+          return "POX" + r
         auth_realm = True # Fallback
     if auth_realm is True:
       r = type(self).__name__
@@ -141,10 +154,18 @@ def basic (__INSTANCE__=None, **kw):
   """
   Lets you add username/password pairs to root of POX webserver
   """
-  from pox.web.webcore import SplitterRequestHandler
   for k,v in kw.items():
-    SplitterRequestHandler.basic_auth_info[k] = v
+    _get_splitter().basic_auth_info[k] = v
 
   # Since you called this explicitly, force auth on regardless of
   # whether you actually set any user/password pairs.
-  SplitterRequestHandler.basic_auth_enabled = True
+  _get_splitter().basic_auth_enabled = True
+
+
+
+def default_realm (realm=True):
+  """
+  Makes all splits share the same auth realm (otherwise they don't)
+  """
+  if realm is True: realm = "POX"
+  _get_splitter().auth_realm = realm
