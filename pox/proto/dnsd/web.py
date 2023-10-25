@@ -13,12 +13,19 @@
 # limitations under the License.
 
 """
-Web interface for the DNS server
+Web interfaces for the DNS server
+
+There are actually two web interfaces in here.  The default one
+adds /dns/, which provides a UI for viewing and editing DNS
+records served by the DNS server.  The :history launcher starts
+/dns/history, which lets you view query history and the stats
+from the DNS server.
 """
 
 from pox.core import core
 from pox.web.webcore import InternalContentHandler
 import pox.lib.packet as pkt
+import datetime
 
 log = core.getLogger()
 
@@ -196,6 +203,107 @@ def launch (no_ttl_setting=False, no_alpn_setting=False):
 
   def config ():
     core.WebServer.set_handler("/dns/", DNSWebHandler,
+                               args = dict(_dns=core.DNSServer))
+
+  core.call_when_ready(config, ["WebServer", "DNSServer"])
+
+
+
+_hist_head = r"""
+<html>
+<head>
+<title>DNS History</title>
+<script>
+
+if (location.hash == "#refresh")
+  setTimeout( ()=>location.reload(), 5000);
+
+function refresh (auto)
+{
+  if (auto)
+  {
+    location.hash = "#refresh";
+    location.reload();
+  }
+  else
+  {
+    location.href = location.href.split("#")[0];
+  }
+  return false;
+}
+
+document.onreadystatechange = function ()
+{
+  if (document.readyState == "complete")
+  {
+    // At least on Safari, doing it without a timeout doesn't work
+    setTimeout( ()=>window.scrollTo(0, document.body.scrollHeight), 0 );
+  }
+};
+
+</script>
+</head>
+<body>
+<table border="2">
+"""
+
+_hist_foot = r"""
+</table>
+<button onclick="return refresh(false);">Refresh</button>
+<button onclick="return refresh(true);">AutoRefresh</button>
+</body>
+</html>
+"""
+
+class DNSHistoryHandler (InternalContentHandler):
+  args_content_lookup = False
+
+  @property
+  def _dns (self):
+    r = self.args.get("dns_component")
+    if r: return r
+    return core.DNSServer
+
+  def GET_ (self, _):
+    out = []
+    for ts,query,askers in self._dns.history:
+      try:
+        askers = " ".join(s for s in sorted(askers))
+        t = datetime.datetime.fromtimestamp(ts).isoformat()
+        t = t.rsplit(".",1)[0]
+        t = t.replace("T", " ")
+        if isinstance(query, bytes):
+          query = query.decode("ascii", "replace")
+        query = query.replace("<", "?")
+        row = (f"<tr><td><tt>{t}</tt></td>"
+              +f"<td><tt>{query:45}</tt></td>"
+              +f"<td><tt>{askers}</tt></td></tr>")
+        out.append(row)
+      except Exception:
+        log.exception("Exception while processing history '%s,%s,%s'",
+                      str(ts), str(query), str(asker))
+
+    try:
+      row = []
+      for f in ('badclass','ignore','norecord','novalue','okay'):
+        v = getattr(self._dns, 'counter_'+f)
+        row.append( f'{f}:{v}' )
+      t = datetime.datetime.now().isoformat()
+      t = t.rsplit(".",1)[0]
+      t = t.replace("T", " ")
+      row = " ".join(row)
+      row = f'<tr><td><tt>{t}</tt></td><td colspan="2"><tt>{row}</tt></td></tr>'
+      out.append(row)
+    except Exception:
+      log.exception("While formatting final row")
+
+    return ("text/html", _hist_head + '\n'.join(out) + _hist_foot)
+
+
+
+def history ():
+  def config ():
+    core.WebServer.set_handler("/dns/history", DNSHistoryHandler,
                                args = dict(_dns=core.DNSServer))
 
   core.call_when_ready(config, ["WebServer", "DNSServer"])
