@@ -1,4 +1,4 @@
-# Copyright 2021 James McCauley
+# Copyright 2021,2023 James McCauley
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ Web interface for the DNS server
 
 from pox.core import core
 from pox.web.webcore import InternalContentHandler
+import pox.lib.packet as pkt
 
 log = core.getLogger()
 
@@ -25,44 +26,81 @@ _msg_marker = "<!-- MSG -->"
 
 _header = """
 <html><head><title>DNS Server</title>
-<head>
+</head>
 <body>
 <!-- MSG -->
+
+<form method="POST" autocomplete="on">
 <table id="dnstable" border="2">
   <thead><tr>
     <th>Name</th>
     <th>Value</th>
+    <th>ALPN</th>
+    <th>TTL</th>
   </tr></thead>
   <tbody>
 """
 
 _footer = """
+<tr>
+<td><input id="form_name" name="dns_name" size="30" autofocus /></td>
+<td><input id="form_value" name="dns_value" size="20" /></td>
+<td><input id="form_alpn" name="dns_alpn" size="7" style="display:$ALPN_DISPLAY" /></td>
+<td><input id="form_ttl" name="dns_ttl" size="5" style="display:$TTL_DISPLAY" /></td>
+</tr>
   </tbody>
 </table>
 
-<br/>
-Enter name and value to add an A or CNAME record.
-<br/>
-Enter name only to delete a record.
-
-<form method="POST">
-<input id="form_name" name="dns_name">
-<input id="form_value" name="dns_value">
-<input type="submit">
+<input type="submit" name="dns_submit" value="Submit" />
+<input type="submit" name="dns_del_a" value="Del IPv4" />
+<input type="submit" name="dns_del_aaaa" value="Del IPv6" />
+<input type="submit" name="dns_del_cname" value="Del CNAME" />
+<button onclick="location.href=location.href;return false;">Refresh</button>
 </form>
+
+Use the bottom row to create/modify/delete records.
+<br/>
+Enter name and IPv4/IPv6 address(es) to set an A/AAAA record.  Include an ALPN to also get HTTPS records (if enabled).
+<br/>
+Enter name and alias to set a CNAME record.
+<br/>
+Enter name only to delete records ("Submit" deletes all types at once).
+<br/>
+Click/Shift-click cells to reuse values/rows.
 
 <script>
 
-function onclick ()
+function onclick (e)
 {
-  if (this.cellIndex == 0)
-    document.getElementById("form_name").value = this.innerText;
-  else if (this.cellIndex == 1)
-    document.getElementById("form_value").value = this.innerText;
+  var rowCount = document.getElementById("dnstable").rows.length;
+  if (this.parentElement.rowIndex == rowCount - 1) return;
+  var cellmap = ["name", "value", "alpn", "ttl"];
+  if (e.shiftKey) // Copy all values
+  {
+    var src = this.parentElement.firstElementChild;
+    for (var i = 0; i < cellmap.length; ++i)
+    {
+      var dst = document.getElementById("form_" + cellmap[i]);
+      dst.value = src.innerText;
+      src = src.nextElementSibling;
+    }
+    return;
+  }
+  if (this.cellIndex >= cellmap.length) return;
+  var el = "form_" + cellmap[this.cellIndex];
+  document.getElementById(el).value = this.innerText;
 }
 
 document.querySelectorAll("#dnstable td")
 .forEach(el => el.addEventListener("click", onclick));
+
+
+function onclick_myip ()
+{
+  var el = document.getElementById("myip");
+  document.getElementById("form_value").value = el.innerText;
+}
+
 
 </script>
 
@@ -72,6 +110,8 @@ document.querySelectorAll("#dnstable td")
 
 class DNSWebHandler (InternalContentHandler):
   args_content_lookup = False
+  allow_set_alpn = True
+  allow_set_ttl = True
 
   @property
   def _dns (self):
@@ -85,12 +125,26 @@ class DNSWebHandler (InternalContentHandler):
   def _get_page (self, message=None):
     try:
       o = []
-      for k,v in self._dns.db.items():
-        o.append("<tr><td>%s</td><td>%s</td></tr>"%(k.decode("utf8"),v.value))
+      for k,vv in self._dns.db.items():
+        for v in vv:
+          if not v.is_address and v.type != pkt.dns.rr.CNAME_TYPE: continue
+          val = v.value_str
+          if v.is_address: val = f"<tt>{val}</tt>"
+          alpn = v.synthetic_https_alpn or ''
+          if isinstance(k, bytes): k = k.decode('ascii')
+          r = f"<tr><td>{k}</td><td>{val}</td>"
+          r += f"<td>{alpn}</td><td>{v.ttl}</td></tr>"
+          o.append(r)
 
-      more = "<br/>Your IP is: " + self.client_address[0] + "\n<br/>"
+      more = ('<br/>Your IP is: <span onclick="onclick_myip()" id="myip"><tt>'
+              + self.client_address[0] + "</tt></span>\n<br/>")
 
-      full = _header + "\n".join(o) + more + _footer
+      footer = _footer
+      footer = footer.replace("$ALPN_DISPLAY",
+                              "" if self.allow_set_alpn else "none")
+      footer = footer.replace("$TTL_DISPLAY",
+                              "" if self.allow_set_ttl else "none")
+      full = _header + "\n".join(o) + more + footer
       if message: full = full.replace(_msg_marker, message)
 
       return ("text/html", full)
@@ -101,11 +155,32 @@ class DNSWebHandler (InternalContentHandler):
     try:
       n = data.getvalue("dns_name", "")
       v = data.getvalue("dns_value", "")
+      alpn = data.getvalue("dns_alpn", "")
+      ttl = data.getvalue("dns_ttl", "")
+      v = v.strip().replace(" ", ",")
+
+      delete = v == ""
+      if data.getvalue("dns_del_a", ""): delete = "A"
+      if data.getvalue("dns_del_aaaa", ""): delete = "AAAA"
+      if data.getvalue("dns_del_cname", ""): delete = "CNAME"
+
+      if ttl == "": ttl = None
+      if ttl: ttl = int(ttl)
+
+      if not alpn: alpn = False
+
+      if not self.allow_set_ttl: ttl = None
+      if not self.allow_set_alpn: alpn = None
+
       msg = None
-      if not v:
-        if not self._dns.del_record(n):
+      if delete:
+        if delete is True: delete = None
+        if v or alpn or (ttl is not None):
+          msg = ('<hr/><p style="color:red;">Only name can be specified when'
+                 + ' deleting</p><hr/>')
+        elif not self._dns.del_record(n, qtype=delete):
           msg = '<hr/><p style="color:red;">Record deletion failed</p><hr/>'
-      elif not self._dns.add_record(n, v):
+      elif not self._dns.add_record(n, v, https_alpn=alpn, ttl=ttl):
         msg = '<hr/><p style="color:red;">Record modify/add failed</p><hr/>'
       return self._get_page(message=msg)
     except Exception:
@@ -113,7 +188,10 @@ class DNSWebHandler (InternalContentHandler):
 
 
 
-def launch ():
+def launch (no_ttl_setting=False, no_alpn_setting=False):
+  DNSWebHandler.allow_set_alpn = not no_alpn_setting
+  DNSWebHandler.allow_set_ttl = not no_ttl_setting
+
   def config ():
     core.WebServer.set_handler("/dns/", DNSWebHandler,
                                args = dict(_dns=core.DNSServer))
