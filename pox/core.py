@@ -1,4 +1,4 @@
-# Copyright 2011-2022 James McCauley
+# Copyright 2011-2023 James McCauley
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -245,7 +245,7 @@ class POXCore (EventMixin):
 
   @property
   def banner (self):
-    return "{0} / Copyright 2011-2022 James McCauley, et al.".format(
+    return "{0} / Copyright 2011-2023 James McCauley, et al.".format(
      self.version_string)
 
   @property
@@ -416,7 +416,7 @@ class POXCore (EventMixin):
       if not l.isEnabledFor(logging.WARNING):
         l.setLevel(logging.WARNING)
       l.warn(*args)
-    good_versions = ("3.6", "3.7", "3.8", "3.9", "3.10")
+    good_versions = "3.6 3.7 3.8 3.9 3.10 3.11 3.12".split()
     if vers not in good_versions:
       vwarn("POX requires one of the following versions of Python: %s",
              " ".join(good_versions))
