@@ -52,6 +52,23 @@ RR = pkt.dns.rr
 log = core.getLogger()
 
 
+# Default list of queries to outright ignore.  These are known probes or
+# amplification attacks.
+_default_ignore = set("""
+sl
+id.server
+version.bind
+hostname.bind
+dnsscan.shadowserver.org
+www.cybergreen.net
+test.openresolver.com
+access-board.gov
+qq.com
+www.qq.com
+mz.gov.pl
+""".strip().lower().split())
+
+
 def _fa (addr):
   """ Format address """
   if isinstance(addr, tuple) and len(addr) == 2:
@@ -159,11 +176,25 @@ class DNSRecord (object):
 
 class DNSServer (object):
   counter_badclass = 0
+  counter_ignore   = 0
   counter_norecord = 0
   counter_novalue  = 0
   counter_okay     = 0
 
-  def __init__ (self, bind_ip=None, default_suffix=None, udp=True, doh=None):
+  def __init__ (self, bind_ip=None, default_suffix=None, udp=True, doh=None,
+                ignore=None):
+    if ignore is not None:
+      ignore = set(ignore)
+      if "." in ignore:
+        ignore.remove(".")
+        ignore.update(_default_ignore)
+      def fixb (s):
+        if isinstance(s, str):
+          return s.encode("ascii")
+        return s
+      ignore = set((fixb(x) for x in ignore))
+    self.ignore = ignore
+
     self.log = log
     self.db = {}
     self.bind_ip = bind_ip
@@ -355,6 +386,9 @@ class DNSServer (object):
     self.log.debug("< %s (from %s)", req, _fa(addr))
 
   def _do_question (self, sock, addr, data, req, q, res):
+    if q.name.lower() in self.ignore:
+      self.counter_ignore += 1
+      return False
     if q.qclass != 1:
       # Only IN
       self.counter_badclass += 1
@@ -565,7 +599,8 @@ def https_alpn (alpn=False):
   DNSRecord.DEFAULT_ALPN = alpn
 
 
-def launch (protocols = "udp", local_ip = None, default_suffix = None):
+def launch (protocols = "udp", local_ip = None, default_suffix = None,
+            ignore = None):
   """
   Start a DNS server
 
@@ -573,11 +608,16 @@ def launch (protocols = "udp", local_ip = None, default_suffix = None):
                            default is "udp".  See below.
   --local-ip=<IP>          IP address for serving DNS over UDP.
   --default-suffix=<name>  The default suffix for domain names.
+  --ignore=<hostnames>     Comma-separated list of names to ignore.  "." is a
+                           special value which adds a default list.
 
   DNS can be served atop multiple other protocols, with "udp" being the
   most common.  DNS Over HTTPS ("doh") is also supported.  Other notable
   examples are TCP and TLS, but POX does not presently support these.
   """
+  if ignore is True: ignore = "."
+  elif not ignore: ignore = ""
+  ignore = ignore.strip().lower().replace(","," ").split()
 
   if protocols is True or protocols == "*": protocols = "all"
   protocols = protocols.lower().replace(","," ")
@@ -591,4 +631,4 @@ def launch (protocols = "udp", local_ip = None, default_suffix = None):
     raise RuntimeError(f"Unknown protocol(s): {', '.join(protocols)}")
 
   core.registerNew(DNSServer, bind_ip=local_ip, default_suffix=default_suffix,
-                   udp=udp, doh=doh)
+                   udp=udp, doh=doh, ignore=ignore)
