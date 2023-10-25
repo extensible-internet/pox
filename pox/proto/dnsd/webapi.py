@@ -54,7 +54,7 @@ DNS database may be vulnerable to spoofed entries via CSRF.
 from pox.core import core
 from pox.web.webcore import InternalContentHandler
 from urllib.parse import parse_qsl
-from pox.lib.addresses import IPAddr
+from pox.lib.addresses import IPAddr, IPAddr6
 
 log = core.getLogger()
 
@@ -77,7 +77,23 @@ class DNSWebAPIHandler (InternalContentHandler):
     qs = dict(parse_qsl(p))
 
     hn = qs.get("hostname")
-    ip = qs.get("myip", self.client_address[0])
+    ip = qs.get("myip", None)
+    ip6 = qs.get("myip6", None)
+
+    # "ip" will definitely get set to either "myip" or "myip6" or the client
+    # IP address.  If "myip" *and* "myip6" are set, then ip6 is also set.
+    if (not ip) and (not ip6):
+      ip = self.client_address[0]
+    if (not ip) and ip6:
+      ip = ip6
+      ip6 = None
+
+    if ip6:
+      # Do a bonus IPv6 update, which won't influence the output at all
+      # (it will work or it won't; life is mysterious).
+      self._update(hn, ip6)
+
+    return self._update(hn, ip)
 
     # Some of the errors:
     #  badauth
@@ -90,13 +106,17 @@ class DNSWebAPIHandler (InternalContentHandler):
     # Who knows we if we use them right, but if you
     # get one, something has definitely gone wrong.
 
+  def _update (self, hn, ip):
     if not hn: return ("text/plain", "nohost")
 
     try:
       ip = IPAddr(ip)
     except Exception:
-      log.warn("Bad IP address: %s", ip)
-      return ("text/plain", "dnserr")
+      try:
+        ip = IPAddr6(ip)
+      except Exception:
+        log.warn("Bad IP address: %s", ip)
+        return ("text/plain", "dnserr")
 
     hn = hn.split(",")
 
