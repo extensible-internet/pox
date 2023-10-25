@@ -139,6 +139,7 @@ def _do_launch (argv, skip_startup=False):
 
   curargs = {}
   pox_options = curargs
+  cur_component = "POX"
 
   for arg in argv:
     if not arg.startswith("-"):
@@ -151,10 +152,15 @@ def _do_launch (argv, skip_startup=False):
         components[arg] = []
       components[arg].append(curargs)
       component_order.append(arg)
+      cur_component = arg
     else:
       arg = arg.lstrip("-").split("=", 1)
       arg[0] = arg[0].replace("-", "_")
       if len(arg) == 1: arg.append(True)
+      if arg[0] in curargs:
+        print(f"Argument '{arg[0]}' specified multiple times for "
+              + f"{cur_component}!")
+        return False
       curargs[arg[0]] = arg[1]
 
   if not skip_startup:
