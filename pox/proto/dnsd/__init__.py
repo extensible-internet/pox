@@ -55,6 +55,8 @@ class DNSServer (object):
 
   def _handle_GoingUpEvent (self, event):
     self.sock = s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+    s.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+
     if self.bind_ip is None:
       bind = ""
     else:
