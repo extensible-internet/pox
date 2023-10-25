@@ -1,4 +1,4 @@
-# Copyright 2021 James McCauley
+# Copyright 2021,2023 James McCauley
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,17 +15,34 @@
 """
 A not-particularly-good, but working DNS server
 
-It also has a component for web-based administration.
+It's definitely not full featured, and doesn't even really try to honor
+all of the RFCs... but it works well enough to resolve A and AAAA records
+to all the software I've tried.  It also can serve HTTPS records with
+ALPN info, which is how you can, for example, convince browsers to
+connect via HTTP/2 or HTTP/3 without first connecting via HTTP/1.1.
+
+Besides serving over the usual UDP protocol described in RFC1035, it can
+also use the webcore component to serve DNS Over HTTPS (DoH) as described
+in RFC8484.
+
+There's a related component that allows some simple web-based administration,
+and another which provides a web-based API compatible with existing
+dynamic DNS services and therefore with existing DNS-update tools.
 """
 
 from pox.core import core
 import pox.lib.packet as pkt
-from pox.lib.addresses import IPAddr, IP_ANY
+from pox.lib.addresses import IPAddr, IPAddr6, IP_ANY
 import threading
 from pox.core import core
+from pox.lib.util import multi_instance
 from socket import *
 from select import select
 import re
+import struct
+import base64
+import random
+from pox.web.webcore import SplitRequestHandler, cgi_parse_header
 
 log = core.getLogger()
 
@@ -37,24 +54,150 @@ log = core.getLogger()
 
 class DNSRecord (object):
   DEFAULT_TTL = 60 * 10
+  DEFAULT_ALPN = False
+  https_addr_hint = False
+  shuffle = False
+
   def __init__ (self, name, value, type=RR.A_TYPE, ttl=DEFAULT_TTL):
+    if not isinstance(value, list):
+      value = [value]
     self.name = name
-    self.value = value
+    self._values = value
     self.type = type
     self.ttl = ttl
+    self._synthetic_https_alpn = self.DEFAULT_ALPN # Can be a str like 'h2,h3'
+
+  @property
+  def synthetic_https_alpn (self):
+    # Should this also be allowed for CNAMEs?
+    if not self.is_address: return False
+    return self._synthetic_https_alpn
+
+  @synthetic_https_alpn.setter
+  def synthetic_https_alpn (self, value):
+    self._synthetic_https_alpn = value
+
+  @property
+  def value (self):
+    return self.values[0]
+
+  @property
+  def values (self):
+    if not self.shuffle: return self._values
+    t = list(self._values)
+    random.shuffle(t)
+    return t
+
+  @property
+  def value_str (self):
+    if len(self.values) == 1:
+      return str(self.values[0])
+    return ",".join(str(x) for x in self.values)
+
+  @property
+  def is_address (self):
+    return self.type == RR.A_TYPE or self.type == RR.AAAA_TYPE
+
+  def __repr__ (self):
+    t = pkt.DNS.rrtype_to_str.get(self.type, str(self.type))
+    n = self.name
+    if isinstance(n, bytes): n = n.decode("ascii")
+    alpn = ''
+    if self.synthetic_https_alpn:
+      alpn = f" alpn={self.synthetic_https_alpn}"
+    return (f"{type(self).__name__}(name={n} value={self.value_str}"
+           +f" type={t} ttl={self.ttl}{alpn})")
+
+  def make_https_record (self, alpn=None, addr_hint=None):
+    """
+    Synthesize an HTTPS record
+
+    If alpn is None, use the default from synthesize_https_alpn
+
+    Note that since this synthetically generates an HTTPS record from a
+    single A or AAAA record, if addr_hint is turned on, it will only
+    have one of the A or AAAA addresses!
+    """
+    assert self.is_address
+
+    if addr_hint is None: addr_hint = self.https_addr_hint
+
+    if alpn is None: alpn = self.synthetic_https_alpn
+    if not alpn: alpn = ''
+
+    if isinstance(alpn, str):
+      alpn = alpn.encode("ascii")
+    if isinstance(alpn, bytes):
+      alpn = alpn.replace(b",", b" ").split()
+    alpn = [x.encode() if isinstance(x,str) else x for x in alpn]
+    alpn = [struct.pack("B", len(x)) + x for x in alpn]
+    alpn = b''.join(alpn)
+    parms = {}
+    hv = [1,b'',parms]
+    parms[DNS.SVCPK_ALPN] = alpn
+    if addr_hint: # Address hints?
+      if self.type == RR.A_TYPE:
+        parms[DNS.SVCPK_IPV4HINT] = self.value.raw
+      else: # AAAA
+        parms[DNS.SVCPK_IPV6HINT] = self.value.raw
+    if not addr_hint and not alpn:
+      return None
+    hr = DNSRecord(self.name, [hv], RR.HTTPS_TYPE, self.ttl)
+
+    return hr
 
 
 class DNSServer (object):
-  DEFAULT_TTL = 60 * 10
-
-  def __init__ (self, bind_ip=None, default_suffix=None):
+  def __init__ (self, bind_ip=None, default_suffix=None, udp=True, doh=None):
+    self.log = log
     self.db = {}
     self.bind_ip = bind_ip
     self.default_suffix = default_suffix
 
+    self._enable_udp = udp
+    self._enable_doh = doh
+
     core.add_listener(self._handle_GoingUpEvent)
 
+  def _get (self, name, qtype):
+    if isinstance(name, bytes): name = name.decode("ascii")
+    rs = [x for x in self.db.get(name, []) if x.type == qtype]
+    if not rs: return None
+    return rs[0]
+
+  def _set (self, name, r):
+    if isinstance(name, bytes): name = name.decode("ascii")
+    if name not in self.db:
+      self.db[name] = []
+
+    self.del_record(name, r.type)
+
+    self.db[name].append(r)
+    self.log.debug(f"Set record {r}")
+    return True
+
   def _handle_GoingUpEvent (self, event):
+    if self._enable_udp:
+      try:
+        self._do_enable_udp()
+      except Exception:
+        self.log.exception("Couldn't enable UDP")
+    if self._enable_doh is not False:
+      try:
+        self._do_enable_doh()
+      except Exception:
+        self.log.exception("Couldn't enable DNS-Over-HTTPS")
+
+  def _do_enable_doh (self):
+    def enable_dns_over_https ():
+      self.log.info("Starting to serve DNS-Over-HTTPS")
+      core.WebServer.set_handler("/dns-query/", DOHHandler)
+    if hasattr(core, 'WebServer'):
+      enable_dns_over_https()
+    elif self._enable_doh:
+      self.log.error("Can't do DoH without web server running!")
+
+  def _do_enable_udp (self):
     self.sock = s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
     s.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
@@ -66,7 +209,7 @@ class DNSServer (object):
       s.bind( (bind, 53) )
     except Exception:
       if bind == "": bind = "<Any>"
-      log.exception("While binding to %s:%s", bind, 53)
+      self.log.exception("Error while binding to %s:%s", bind, 53)
       return
 
     s.setblocking(False)
@@ -81,87 +224,335 @@ class DNSServer (object):
     return False
 
   def _fixname (self, n):
+    if isinstance(n, bytes):
+      n = n.decode("ascii")
     if '.' not in n:
       if self.default_suffix:
         n = n + "." + self.default_suffix.lstrip(".")
     if not self.is_valid_name(n): return None
-    try:
-      return n.encode("utf8")
-    except Exception:
-      return None
+    return n
 
-  def del_record (self, name):
+  def del_record (self, name, qtype=None):
     name = self._fixname(name)
     if name not in self.db: return False
-    self.db.pop(name)
-    return True
+    if qtype is None:
+      self.db.pop(name)
+      return True
+    if isinstance(qtype, str):
+      qtype = qtype.upper()
+      # There should be a good way to do this but currently isn't.
+      t = [k for k,v in pkt.DNS.rrtype_to_str.items() if v == qtype]
+      if not t: return False
+      qtype = t[0]
 
-  def add_record (self, name, v):
+    for i,r in enumerate(self.db[name]):
+      if r.type == qtype:
+        del self.db[name][i]
+        return True
+
+    return False
+
+  def add_record (self, name, v, ttl=None, https_alpn=None, qtype=None,
+                  shuffle=None):
     name = self._fixname(name)
     if not name: return False
+    if ttl is None: ttl = DNSRecord.DEFAULT_TTL
+    if isinstance(v, list):
+      pass
+    else:
+      if isinstance(v, list):
+        v = ",".join(str(x) for x in v)
+      else:
+        v = str(v)
+      if "," in v:
+        v = v.split(',')
+      else:
+        v = [v]
+      v = [x.replace('"', '').replace("'", '').strip() for x in v]
     try:
-      v = str(v)
-      if v.count(".") != 3: raise RuntimeError()
-      v = IPAddr(v)
-      r = DNSRecord(name, v, RR.A_TYPE, self.DEFAULT_TTL)
+      if v[0].count(".") == 3:
+        t = RR.A_TYPE
+        v = [IPAddr(x) for x in v]
+      elif ":" in v[0]:
+        t = RR.AAAA_TYPE
+        v = [IPAddr6(x) for x in v]
+      else:
+        raise RuntimeError(f"Bad record {name}={v}")
+      r = DNSRecord(name, v, t if qtype is None else qtype, ttl)
+
+      if https_alpn is not None:
+        r.synthetic_https_alpn = https_alpn
+      # Old method -- generate it and add it as normal.  We now generate it
+      # on the fly if it's requested and we're configured to do so.
+      #if https_alpn:
+      #  # At present, this is how you make this type of record (ugly)...
+      #  alpn = https_alpn
+      #  if isinstance(alpn, str):
+      #    alpn = alpn.encode("ascii")
+      #  if isinstance(alpn, bytes):
+      #    alpn = alpn.replace(b",", b" ").split()
+      #  alpn = [x.encode() if isinstance(x,str) else x for x in alpn]
+      #  alpn = [struct.pack("B", len(x)) + x for x in alpn]
+      #  alpn = b''.join(alpn)
+      #  parms = {}
+      #  hv = [1,b'',parms]
+      #  parms[DNS.SVCPK_ALPN] = alpn
+      #  if False: # Address hints?
+      #    if t == RR.A_TYPE:
+      #      parms[DNS.SVCPK_IPV4HINT] = v[0].raw
+      #    else: # AAAA
+      #      parms[DNS.SVCPK_IPV6HINT] = v[0].raw
+      #  hr = DNSRecord(name, [hv], RR.HTTPS_TYPE, ttl)
+      #  self._set(name, hr)
+
     except Exception:
-      if not self.is_valid_name(v): return False
-      r = DNSRecord(name, v, RR.CNAME_TYPE, self.DEFAULT_TTL)
-    self.db[name] = r
-    return True
+      if len(v) > 1: return False
+      if not self.is_valid_name(v[0]): return False
+      r = DNSRecord(name, v, RR.CNAME_TYPE if qtype is None else qtype, ttl)
+
+    if shuffle is not None:
+      r.shuffle = shuffle
+
+    return self._set(name, r)
 
   def _do_request (self, sock, addr, data):
     req = DNS(raw=data)
     if req.qr: return
     if not req.questions: return
-    q = req.questions[0]
-    if q.qclass != 1: return
     r = DNS()
-    r.questions.append(q)
-    rec = self.db.get(q.name)
-    if not rec or rec.type != q.qtype:
+    r.qr = 1
+    r.id = req.id
+    #r.rd = req.rd
+    #r.ra = True
+    #r.aa = True
+
+    anything = False
+
+    for q in req.questions:
+      if self._do_question(sock, addr, data, req, q, r) is not False:
+        anything = True
+
+    if anything:
+      return r
+
+  def _do_question (self, sock, addr, data, req, q, res):
+    self.log.debug("< %s (from %s)", req, addr)
+    if q.qclass != 1: return # Only IN
+
+    res.questions.append(q)
+
+    rec = self._get(q.name, q.qtype)
+
+    if not rec and q.qtype == RR.HTTPS_TYPE:
+      # See about synthesizing an HTTPS record.
+      # We currently only do this for A/AAAA records; it's possible
+      # we should for CNAME too... what do browsers actually check?
+      t = self._get(q.name, RR.A_TYPE)
+      if not t: t = self._get(q.name, RR.AAAA_TYPE)
+      if t:
+        rec = t.make_https_record()
+
+    if not rec and q.qtype != RR.CNAME_TYPE:
+      rec = self._get(q.name, RR.CNAME_TYPE)
+
+    if not rec:
       # Might want to send an NXDOMAIN, but we don't currently have SOA stuff
       # at all.  So just send back an empty reply; they'll probably get the
       # hint!
-      log.debug("No such domain: %s", q.name.decode("utf8", errors="ignore"))
+      self.log.info("No such domain: %s",
+                    q.name.decode("utf8", errors="ignore"))
     else:
-      rr = RR(q.name, rec.type, 1, rec.ttl, 0, rec.value)
-      r.answers.append(rr)
-    r.qr = 1
-    r.id = req.id
-    #r.aa = True
+      for value in rec.values:
+        rr = RR(q.name, rec.type, 1, rec.ttl, 0, value)
+        res.answers.append(rr)
 
-    log.debug("< %s (from %s)", req, addr)
-    log.debug("> %s", r)
-    self._finish_request(sock, addr, data, r)
+    return rec
 
-  def _finish_request (self, sock, addr, data, r):
+  def _send_response (self, sock, addr, data, r):
+    self.log.info("> %s (to %s)", r, addr)
     sock.sendto(r.pack(), addr)
+
+  def _respond (self, sock, addr, data):
+    r = self._do_request(sock, addr, data)
+    if r is not None:
+      self._send_response(sock, addr, data, r)
 
   def _server_thread (self):
     s = self.sock
-    log.info("Starting DNS server")
+    self.log.info("Starting to serve DNS via UDP")
     while True:
       rr,_,_ = select([s],[],[], 5)
       if rr:
         data,addr = s.recvfrom(1500)
-        core.call_later(self._do_request, s, addr, data)
+        core.call_later(self._respond, s, addr, data)
 
 
+class DOHHandler (SplitRequestHandler):
+  """
+  Request handler for DNS-Over-HTTPS
+  """
+  ac_headers = False
+  pox_cookieguard = False
+
+  def do_GET (self):
+    self._do_get_or_head()
+
+  def do_HEAD (self):
+    self._do_get_or_head(head_only=True)
+
+  def do_POST (self):
+    mime,params = cgi_parse_header(self.headers.get('content-type'))
+    if mime != 'application/dns-message':
+      self.send_error(400, "Expected DNS data")
+      return
+
+    try:
+      l = int(self.headers.get("content-length", "0"))
+    except Exception:
+      l = 0
+    if l <= 0:
+      self.send_error(400, "Expected DNS data")
+      return
+
+    data = self.rfile.read(l)
+    self._process(data)
+
+  def _do_get_or_head (self, head_only=False):
+    q = self.path.split("?dns=", 1)
+    if len(q) != 2:
+      self.send_error(404, "File not found")
+      return
+    q = q[1]
+    data = base64.urlsafe_b64decode(q+"===") # Extra padding is ignored
+    self._process(data, head_only=head_only)
+
+  def _process (self, data, head_only=False):
+    res = core.DNSServer._do_request(None, None, data)
+    if res is None:
+      # Hmm!
+      self.log_error("%s", "No DNS response")
+      r = b''
+    else:
+      core.DNSServer.log.info("> %s (to %s)", DNS(raw=res.pack()), "Web")
+      r = res.pack()
+
+    self.send_response(200)
+    self.send_header("Content-Type", "application/dns-message")
+    self.send_header("Content-Length", str(len(r)))
+    if res is not None and res.answers:
+      ttl = min(x.ttl for x in res.answers)
+      self.send_header("Access-Control-Allow-Max-Age", str(ttl))
+      self.send_header("Access-Control-Allow-Origin", "*")
+    self.end_headers()
+    if not head_only:
+      self.wfile.write(r)
+
+
+
+@multi_instance
 def add (**kw):
   """
-  Adds A or CNAME records
+  Adds A, AAAA, or CNAME records
+
+  Use options like --example.com=127.0.0.1.  You can specify more than one.
+  To specify multiple options for the same domain, separate them with commas
+  like --example.com=::1,::2.
+
+  You can also set options; these affect all records added with the same
+  invocation of the "add" launcher.  To add records with different options,
+  use a new instance of "add".
+
+  Options like --HTTPS-ALPN=h3,h2 or whatever will cause added A/AAAA records
+  to have synthesized HTTPS records.
+
+  The --TTL=seconds option will set the TTL.
+
+  Finally, You can pass --TYPE=type to override the record type.  This is
+  most likely to be useful for setting --TYPE=NS.
   """
+  alpn = None
+  ttl = None
+  qtype = None
+  entries = {}
   for k,v in kw.items():
-    core.DNSServer.add_record(k, v)
+    k = k.replace("_", "-")
+    v = str(v).replace("_", "-")
+    if k == "HTTPS-ALPN":
+      alpn = v
+      continue
+    if k == "TTL":
+      ttl = int(v)
+      continue
+    if k == "TYPE":
+      if (not v) or (v is True):
+        t = None
+      else:
+        try:
+          t = int(v)
+        except Exception:
+          t = getattr(RR, v.upper() + "_TYPE")
+          if not isinstance(t, int): raise RuntimeError("Bad record type")
+      qtype = t
+      continue
+    entries[k] = v
+
+  for k,v in entries.items():
+    if not core.DNSServer.add_record(k, v, https_alpn=alpn,
+                                     ttl=ttl,qtype=qtype):
+      log.warning(f"Could not add DNS record {k} = {v}")
+  #log.debug(core.DNSServer.db)
 
 
+@multi_instance
 def ttl (ttl):
-  try:
-    core.DNSServer.DEFAULT_TTL = int(ttl)
-  except Exception:
-    DNSServer.DEFAULT_TTL = int(ttl)
+  DNSRecord.DEFAULT_TTL = int(ttl)
 
 
-def launch (local_ip = None, default_suffix = None):
-  core.registerNew(DNSServer, bind_ip=local_ip, default_suffix=default_suffix)
+@multi_instance
+def shuffle (disable=False):
+  """
+  Causes subsequent records to have multiple addresses shuffled
+  """
+  DNSRecord.shuffle = not disable
+
+
+@multi_instance
+def https_alpn (alpn=False):
+  """
+  Configures the default for synthetic HTTPS record ALPNs
+
+  If specified with no argument, synthetic HTTPS records are turned off.
+  Otherwise, it's an ALPN string, e.g., "h2,h3".
+  """
+  if alpn is True:
+    raise RuntimeError("You must presently specify an actual value")
+  DNSRecord.DEFAULT_ALPN = alpn
+
+
+def launch (protocols = "udp", local_ip = None, default_suffix = None):
+  """
+  Start a DNS server
+
+  --protocols=<protocols>  A comma-separated list of protocols or "all".  The
+                           default is "udp".  See below.
+  --local-ip=<IP>          IP address for serving DNS over UDP.
+  --default-suffix=<name>  The default suffix for domain names.
+
+  DNS can be served atop multiple other protocols, with "udp" being the
+  most common.  DNS Over HTTPS ("doh") is also supported.  Other notable
+  examples are TCP and TLS, but POX does not presently support these.
+  """
+
+  if protocols is True or protocols == "*": protocols = "all"
+  protocols = protocols.lower().replace(","," ")
+  protocols = {x.strip():True for x in protocols.split()}
+  everything = protocols.pop("all", False)
+  check = lambda x: protocols.pop(x, False) or everything
+
+  udp = check("udp")
+  doh = check("doh")
+  if protocols:
+    raise RuntimeError(f"Unknown protocol(s): {', '.join(protocols)}")
+
+  core.registerNew(DNSServer, bind_ip=local_ip, default_suffix=default_suffix,
+                   udp=udp, doh=doh)
