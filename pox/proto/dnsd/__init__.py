@@ -182,7 +182,7 @@ class DNSServer (object):
   counter_okay     = 0
 
   def __init__ (self, bind_ip=None, default_suffix=None, udp=True, doh=None,
-                ignore=None):
+                bind_port=53, ignore=None):
     if ignore is not None:
       ignore = set(ignore)
       if "." in ignore:
@@ -198,6 +198,7 @@ class DNSServer (object):
     self.log = log
     self.db = {}
     self.bind_ip = bind_ip
+    self.bind_port = bind_port or 53
     self.default_suffix = default_suffix
 
     self._enable_udp = udp
@@ -253,7 +254,7 @@ class DNSServer (object):
     else:
       bind = str(self.bind_ip)
     try:
-      s.bind( (bind, 53) )
+      s.bind( (bind, self.bind_port) )
     except Exception:
       if bind == "": bind = "<Any>"
       self.log.exception("Error while binding to %s:%s", bind, 53)
@@ -599,14 +600,15 @@ def https_alpn (alpn=False):
   DNSRecord.DEFAULT_ALPN = alpn
 
 
-def launch (protocols = "udp", local_ip = None, default_suffix = None,
-            ignore = None):
+def launch (protocols = "udp", local_ip = None, local_port = None,
+            default_suffix = None, ignore = None):
   """
   Start a DNS server
 
   --protocols=<protocols>  A comma-separated list of protocols or "all".  The
                            default is "udp".  See below.
   --local-ip=<IP>          IP address for serving DNS over UDP.
+  --local-port=<port>      UDP port number for DNS over UDP
   --default-suffix=<name>  The default suffix for domain names.
   --ignore=<hostnames>     Comma-separated list of names to ignore.  "." is a
                            special value which adds a default list.
@@ -630,5 +632,7 @@ def launch (protocols = "udp", local_ip = None, default_suffix = None,
   if protocols:
     raise RuntimeError(f"Unknown protocol(s): {', '.join(protocols)}")
 
+  local_port = int(local_port) if local_port else None
+
   core.registerNew(DNSServer, bind_ip=local_ip, default_suffix=default_suffix,
-                   udp=udp, doh=doh, ignore=ignore)
+                   udp=udp, doh=doh, bind_port=local_port, ignore=ignore)
