@@ -52,6 +52,16 @@ RR = pkt.dns.rr
 log = core.getLogger()
 
 
+def _fa (addr):
+  """ Format address """
+  if isinstance(addr, tuple) and len(addr) == 2:
+    # Probably an IP address!
+    p = addr[1]
+    if p == -1: p = "Web"
+    return f"{addr[0]}:{p}"
+  return str(addr)
+
+
 class DNSRecord (object):
   DEFAULT_TTL = 60 * 10
   DEFAULT_ALPN = False
@@ -335,9 +345,12 @@ class DNSServer (object):
     if anything:
       return r
 
+  def _note_request (self, sock, addr, data,req, q):
+    self.log.debug("< %s (from %s)", req, _fa(addr))
+
   def _do_question (self, sock, addr, data, req, q, res):
-    self.log.debug("< %s (from %s)", req, addr)
     if q.qclass != 1: return # Only IN
+    self._note_request(sock, addr, data, req, q)
 
     res.questions.append(q)
 
@@ -359,8 +372,8 @@ class DNSServer (object):
       # Might want to send an NXDOMAIN, but we don't currently have SOA stuff
       # at all.  So just send back an empty reply; they'll probably get the
       # hint!
-      self.log.info("No such domain: %s",
-                    q.name.decode("utf8", errors="ignore"))
+      self.log.info("No such domain: %s (from %s)",
+                    q.name.decode("utf8", errors="ignore"), _fa(addr))
     else:
       for value in rec.values:
         rr = RR(q.name, rec.type, 1, rec.ttl, 0, value)
@@ -369,7 +382,7 @@ class DNSServer (object):
     return rec
 
   def _send_response (self, sock, addr, data, r):
-    self.log.info("> %s (to %s)", r, addr)
+    self.log.info("> %s (to %s)", r, _fa(addr))
     sock.sendto(r.pack(), addr)
 
   def _respond (self, sock, addr, data):
@@ -433,7 +446,7 @@ class DOHHandler (SplitRequestHandler):
       self.log_error("%s", "No DNS response")
       r = b''
     else:
-      core.DNSServer.log.info("> %s (to %s)", DNS(raw=res.pack()), "Web")
+      core.DNSServer.log.info("> %s (to %s)", DNS(raw=res.pack()), _fa(addr))
       r = res.pack()
 
     self.send_response(200)
