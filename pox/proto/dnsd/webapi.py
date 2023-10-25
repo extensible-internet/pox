@@ -1,4 +1,4 @@
-# Copyright 2021 James McCauley
+# Copyright 2021,2023 James McCauley
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,11 +17,38 @@ Implements a DNS update web API compatible with other dynamic DNS
 services.
 
 NOTE: You should probably turn on https and HTTP authentication!
+      See samples/create_web_pki.sh for a script that helps set up
+      https.  See samples/basic_tls_web.cfg for a basic configuration
+      (which uses the stuff the script creates).  See the
+      web.authentication component for more on setting up
+      authentication (short version: you can make the curl example
+      below work with web.authentication:basic --user=pass).
 
 A request done with curl would look something like this:
   curl "http://user:pass@localhost:8000/nic/update?\
         hostname=test.somedns.com&myip=11.22.33.44"
 
+The API is basically a baseline version of the API that's used by many
+existing dynamic DNS providers and common dynamic DNS tools.  See:
+  https://www.noip.com/integrate/request
+  https://help.dyn.com/remote-access-api/
+
+Two tools which seem to work just fine are ddclient and inadyn.
+For ddclient, you want the "dyndns2" protocol, which is the default.
+The only slightly unusual thing you need to do for ddclient is to
+set the "server" option in the config file to point at POX (and
+possibly add the -ssl command line option).  For inadyn, you'll
+have to use a custom configuration.  There's a section in its README
+called "Custom DDNS Providers", and it has an example which
+"emulates dyndns.org".  If you just modify the "server" to point at
+your POX, and tweak the "ddns-path" to not hardcode the "dyndns.org"
+suffix, this works fine.
+
+Note that many existing update tools do not handle redirections, so
+POX CookieGuard does not work.  You can set --no-cookieguard for
+this module, which disables it for just the DNS web API.  If you
+use the POX web server for other things, however, this means the
+DNS database may be vulnerable to spoofed entries via CSRF.
 """
 
 from pox.core import core
