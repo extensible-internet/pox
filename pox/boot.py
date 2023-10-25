@@ -186,8 +186,10 @@ def _do_launch (argv, skip_startup=False):
     inst[name] = inst.get(name, -1) + 1
     params = components[name][inst[name]]
     name = name.split(":", 1)
-    launch = name[1] if len(name) == 2 else "launch"
+    launch = name[1].replace("-","_") if len(name) == 2 else "launch"
     name = name[0]
+    fullname = name
+    if launch != "launch": fullname += ":" + launch
     first_arg = params.pop(None, None)
 
     name,module,members = modules[name]
@@ -230,7 +232,7 @@ def _do_launch (argv, skip_startup=False):
            inst[cname] + 1 == len(components[cname]))
 
       if multi == False and len(components[cname]) != 1:
-        print(name, "does not accept multiple instances")
+        print(fullname, "does not accept multiple instances")
         return False
 
       try:
@@ -273,7 +275,7 @@ def _do_launch (argv, skip_startup=False):
             del args['__INSTANCE__']
 
           if f.__doc__ is not None:
-            print("Documentation for {0}:".format(name))
+            print("Documentation for {0}:".format(fullname))
             doc = f.__doc__.split("\n")
             #TODO: only strip the same leading space as was on the first
             #      line
@@ -283,7 +285,7 @@ def _do_launch (argv, skip_startup=False):
           #print(params)
           #print(args)
 
-          print("Parameters for {0}:".format(name))
+          print("Parameters for {0}:".format(fullname))
           if len(args) == 0:
             print(" None.")
           else:
