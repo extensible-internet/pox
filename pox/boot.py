@@ -212,6 +212,11 @@ def _do_launch (argv, skip_startup=False):
               pass
 
       multi = False
+      multi_data = False
+      exmulti = getattr(f, '_pox_multi_instance', None)
+      if exmulti is not None:
+        multi = True
+        multi_data = exmulti
       if f.__code__.co_argcount > 0:
         #FIXME: This code doesn't look quite right to me and may be broken
         #       in some cases.  We should refactor to use inspect anyway,
@@ -221,7 +226,9 @@ def _do_launch (argv, skip_startup=False):
           # It's a multi-instance-aware component.
 
           multi = True
+          multi_data = True
 
+      if multi_data:
           # Special __INSTANCE__ paramter gets passed a tuple with:
           # 1. The number of this instance (0...n-1)
           # 2. The total number of instances for this module

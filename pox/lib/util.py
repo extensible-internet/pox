@@ -618,6 +618,17 @@ def eval_args (f):
   return f
 
 
+def multi_instance (f):
+  """
+  Creates a multi-instance launcher that does NOT receive multi-instance data
+
+  Normally, multi-instance launchers get special multi-instance data in a
+  final __INSTANCE__ parameter.  This creates one without that.
+  """
+  f._pox_multi_instance = False
+  return f
+
+
 if __name__ == "__main__":
   #TODO: move to tests?
   def cb (t,k,v): print(v)
