@@ -561,7 +561,7 @@ class CoreHandler (SplitRequestHandler):
     elif self.path.startswith("/favicon."):
       self.send_favicon(is_get)
     elif not self.path.endswith("/"):
-      self.send_response(302)
+      self.send_response(307)
       self.send_header("Location", self.path + "/")
       self.end_headers()
     else:
@@ -877,7 +877,7 @@ class SplitterRequestHandler (BaseHTTPRequestHandler, BasicAuthMixin,
     while True:
       for m in self.server.matches:
         if self.path.startswith(m[0]):
-          #print m,self.path
+          #print(m,self.path)
           handler = m[1](self, m[0], m[3])
           #pb = self.rec.getPlayback()
           #handler = m[1](pb, *self.args[1:])
@@ -893,7 +893,7 @@ class SplitterRequestHandler (BaseHTTPRequestHandler, BasicAuthMixin,
         handler = self
         if not self.path.endswith('/'):
           # Handle splits like directories
-          self.send_response(302)
+          self.send_response(307)
           self.send_header("Location", self.path + "/")
           self.end_headers()
           break
@@ -906,6 +906,7 @@ class SplitterRequestHandler (BaseHTTPRequestHandler, BasicAuthMixin,
     event = WebRequest(self, handler)
     self.server.raiseEventNoErrors(event)
     if event.handler:
+      #print("dispatch", event.handler, self.command)
       return event.handler._split_dispatch(self.command)
 
 
