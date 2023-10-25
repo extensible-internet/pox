@@ -441,7 +441,14 @@ class DOHHandler (SplitRequestHandler):
     self._process(data, head_only=head_only)
 
   def _process (self, data, head_only=False):
-    res = core.DNSServer._do_request(None, None, data)
+    try:
+      ip = self.headers.get("x-forwarded-for", self.client_address[0])
+      ip = "".join(filter(lambda x: x in set("0123456789.:"), ip))
+      addr = (ip,-1)
+    except Exception:
+      addr = ("Web", -1)
+
+    res = core.DNSServer._do_request(None, addr, data)
     if res is None:
       # Hmm!
       self.log_error("%s", "No DNS response")
