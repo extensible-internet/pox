@@ -36,7 +36,7 @@ def _drop (user="nobody", group="nogroup", umask=0o077):
   os.setuid(pwd.getpwnam(user).pw_uid)
 
   log.info("Dropped root privileges (user:%s group:%s umask:%s)",
-           user, group, oct(umask))
+           user, group, f"0o{umask:03o}")
 
 
 def launch (user="nobody", group="nogroup", umask=0o077):
