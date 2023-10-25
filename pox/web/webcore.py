@@ -561,6 +561,10 @@ class CoreHandler (SplitRequestHandler):
       self.send_info(is_get)
     elif self.path.startswith("/favicon."):
       self.send_favicon(is_get)
+    elif not self.path.endswith("/"):
+      self.send_response(302)
+      self.send_header("Location", self.path + "/")
+      self.end_headers()
     else:
       self.send_error(404, "File not found on CoreHandler")
 
