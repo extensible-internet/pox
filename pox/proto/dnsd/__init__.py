@@ -434,6 +434,7 @@ class DOHHandler (SplitRequestHandler):
     q = self.path.split("?dns=", 1)
     if len(q) != 2:
       self.send_error(404, "File not found")
+      self.log_error("Malformed DoH GET URL")
       return
     q = q[1]
     data = base64.urlsafe_b64decode(q+"===") # Extra padding is ignored
