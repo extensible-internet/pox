@@ -47,9 +47,10 @@ class DNSRecord (object):
 class DNSServer (object):
   DEFAULT_TTL = 60 * 10
 
-  def __init__ (self, bind_ip=None):
+  def __init__ (self, bind_ip=None, default_suffix=None):
     self.db = {}
     self.bind_ip = bind_ip
+    self.default_suffix = default_suffix
 
     core.add_listener(self._handle_GoingUpEvent)
 
@@ -79,9 +80,11 @@ class DNSServer (object):
     if re.match('^[a-zA-Z0-9-.]+$', n): return True
     return False
 
-  @classmethod
-  def _fixname (cls, n):
-    if not cls.is_valid_name(n): return None
+  def _fixname (self, n):
+    if '.' not in n:
+      if self.default_suffix:
+        n = n + "." + self.default_suffix.lstrip(".")
+    if not self.is_valid_name(n): return None
     try:
       return n.encode("utf8")
     except Exception:
@@ -160,5 +163,5 @@ def ttl (ttl):
     DNSServer.DEFAULT_TTL = int(ttl)
 
 
-def launch (local_ip = None):
-  core.registerNew(DNSServer, bind_ip=local_ip)
+def launch (local_ip = None, default_suffix = None):
+  core.registerNew(DNSServer, bind_ip=local_ip, default_suffix=default_suffix)
