@@ -1263,10 +1263,18 @@ def launch (address='', port=8000, static=False, ssl_server_key=None,
   ssl_server_cert = expand(ssl_server_cert)
   ssl_client_certs = expand(ssl_client_certs)
 
-  httpd = SplitThreadedServer((address, int(port)), SplitterRequestHandler,
-                              ssl_server_key=ssl_server_key,
-                              ssl_server_cert=ssl_server_cert,
-                              ssl_client_certs=ssl_client_certs)
+  try:
+    httpd = SplitThreadedServer((address, int(port)), SplitterRequestHandler,
+                                ssl_server_key=ssl_server_key,
+                                ssl_server_cert=ssl_server_cert,
+                                ssl_client_certs=ssl_client_certs)
+  except OSError as e:
+    if e.errno == errno.EADDRINUSE:
+      log.error(f"Couldn't start web server; address {address}:{port} in use")
+      return
+    log.exception("Exception while trying to start web server")
+    return
+
   core.register("WebServer", httpd)
   httpd.set_handler("/", CoreHandler, httpd, True)
   #httpd.set_handler("/foo/", StaticContentHandler, {'root':'.'}, True)
