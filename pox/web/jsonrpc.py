@@ -123,7 +123,7 @@ class JSONRPCHandler (SplitRequestHandler):
     success = False
     if auth.lower().startswith("basic "):
       try:
-        auth = base64.decodestring(auth[6:].strip()).split(':', 1)
+        auth = base64.decodebytes(auth[6:].strip()).split(':', 1)
         success = self.auth_function(auth[0], auth[1])
       except:
         pass
