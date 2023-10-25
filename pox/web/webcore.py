@@ -787,6 +787,31 @@ class SplitCGIRequestHandler (SplitRequestHandler,
         os.chdir(olddir)
 
 
+def _safestr (a, maxlen=64):
+  try:
+    if isinstance(a, bytes): a = a.decode("ascii", "replace")
+    if not isinstance(a, str): return a
+    r = a.encode("ascii", "replace").decode()
+    def slash (s):
+      if ord(s[0]) >= 32: return s
+      return f"\\{ord(s[0]):02x}"
+    r = "".join(slash(x) for x in r)
+
+    # This is sloppy, but it doesn't need to be exact
+    if len(r) > maxlen:
+      o = r
+      t = r.split("\\")
+      r = ''
+      for i,x in enumerate(t):
+        rem = maxlen - len(r)
+        if rem < 8: break
+        if i: r += "\\" + x
+      if len(o) > len(r): r += "..."
+    return r
+  except Exception:
+    return "<Bad string>"
+
+
 class SplitterRequestHandler (BaseHTTPRequestHandler, BasicAuthMixin,
                               POXCookieGuardMixin):
   basic_auth_info = {} # username -> password
@@ -813,9 +838,10 @@ class SplitterRequestHandler (BaseHTTPRequestHandler, BasicAuthMixin,
 
   def log_request (self, code = '-', size = '-'):
     weblog.debug('splitter:"%s" %s %s',
-                 self.requestline, str(code), str(size))
+                 _safestr(self.requestline), str(code), str(size))
 
   def log_error (self, fmt, *args):
+    args = tuple(_safestr(a) for a in args)
     weblog.error('splitter:' + fmt % args)
 
   def log_message (self, fmt, *args):
