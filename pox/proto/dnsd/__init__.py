@@ -42,6 +42,7 @@ import re
 import struct
 import base64
 import random
+import time
 from pox.web.webcore import SplitRequestHandler, cgi_parse_header
 
 log = core.getLogger()
@@ -182,7 +183,7 @@ class DNSServer (object):
   counter_okay     = 0
 
   def __init__ (self, bind_ip=None, default_suffix=None, udp=True, doh=None,
-                bind_port=53, ignore=None):
+                bind_port=53, history=0, ignore=None):
     if ignore is not None:
       ignore = set(ignore)
       if "." in ignore:
@@ -195,6 +196,8 @@ class DNSServer (object):
       ignore = set((fixb(x) for x in ignore))
     self.ignore = ignore
 
+    self.history_length = history
+    self.history = [] # (time, name, requester)
     self.log = log
     self.db = {}
     self.bind_ip = bind_ip
@@ -385,6 +388,27 @@ class DNSServer (object):
 
   def _note_request (self, sock, addr, data,req, q):
     self.log.debug("< %s (from %s)", req, _fa(addr))
+
+    if not self.history_length: return
+
+    ts = time.time()
+    a = _fa(addr)
+    q = q.name
+    done = False
+
+    for i,(ots,oq,oa) in enumerate(reversed(self.history)):
+      if (ts - ots) > 5: break
+      if oq != q: continue
+      if i > 8: break
+      oa.add( a )
+      done = True
+      break
+
+    if not done:
+      self.history.append( (ts, q, {a}) )
+
+    while len(self.history) > self.history_length:
+      del self.history[0]
 
   def _do_question (self, sock, addr, data, req, q, res):
     if q.name.lower() in self.ignore:
@@ -601,7 +625,7 @@ def https_alpn (alpn=False):
 
 
 def launch (protocols = "udp", local_ip = None, local_port = None,
-            default_suffix = None, ignore = None):
+            history = 0, default_suffix = None, ignore = None):
   """
   Start a DNS server
 
@@ -610,6 +634,7 @@ def launch (protocols = "udp", local_ip = None, local_port = None,
   --local-ip=<IP>          IP address for serving DNS over UDP.
   --local-port=<port>      UDP port number for DNS over UDP
   --default-suffix=<name>  The default suffix for domain names.
+  --history[=<size>]       Keep history of requests.
   --ignore=<hostnames>     Comma-separated list of names to ignore.  "." is a
                            special value which adds a default list.
 
@@ -620,6 +645,9 @@ def launch (protocols = "udp", local_ip = None, local_port = None,
   if ignore is True: ignore = "."
   elif not ignore: ignore = ""
   ignore = ignore.strip().lower().replace(","," ").split()
+
+  if history is True: history = 10
+  elif history: history = int(history)
 
   if protocols is True or protocols == "*": protocols = "all"
   protocols = protocols.lower().replace(","," ")
@@ -635,4 +663,5 @@ def launch (protocols = "udp", local_ip = None, local_port = None,
   local_port = int(local_port) if local_port else None
 
   core.registerNew(DNSServer, bind_ip=local_ip, default_suffix=default_suffix,
-                   udp=udp, doh=doh, bind_port=local_port, ignore=ignore)
+                   udp=udp, doh=doh, bind_port=local_port, history=history,
+                   ignore=ignore)
