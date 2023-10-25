@@ -61,6 +61,7 @@ try:
 except Exception:
   # Old version of Python 3
   from cgi import escape as cgi_escape
+from email.message import EmailMessage
 
 import errno
 from io import StringIO, BytesIO
@@ -87,6 +88,16 @@ def _setAttribs (parent, child):
     setattr(child, a, getattr(parent, a))
 
   setattr(child, 'parent', parent)
+
+
+
+def cgi_parse_header (s):
+  """
+  Modern replacement for cgi.parse_header()
+  """
+  msg = EmailMessage()
+  msg['content-type'] = s
+  return msg.get_content_type(), msg['content-type'].params
 
 
 
@@ -1081,7 +1092,7 @@ class InternalContentHandler (SplitRequestHandler):
       self.wfile.write(r)
 
   def do_POST (self):
-    mime,params = cgi.parse_header(self.headers.get('content-type'))
+    mime,params = cgi_parse_header(self.headers.get('content-type'))
     if mime == "application/x-www-form-urlencoded":
       pass
     elif mime == 'multipart/form-data':
@@ -1130,11 +1141,11 @@ class FileUploadHandler (SplitRequestHandler):
       self.wfile.write(r.encode())
 
   def do_POST (self):
-    mime,params = cgi.parse_header(self.headers.get('content-type'))
+    mime,params = cgi_parse_header(self.headers.get('content-type'))
     if mime != 'multipart/form-data':
       self.send_error(400, "Expected form data")
       return
-    #query = cgi.parse_multipart(self.rfile, params)
+    #query = cgi_parse_multipart(self.rfile, params)
     #data = query.get("upload")
     data = cgi.FieldStorage( fp = self.rfile, headers = self.headers,
                              environ={ 'REQUEST_METHOD':'POST' } )
