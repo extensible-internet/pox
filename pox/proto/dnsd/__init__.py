@@ -67,6 +67,8 @@ access-board.gov
 qq.com
 www.qq.com
 mz.gov.pl
+ip.parrotdns.com
+cyberresilience.io
 """.strip().lower().split())
 
 
