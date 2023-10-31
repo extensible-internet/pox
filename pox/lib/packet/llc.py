@@ -90,7 +90,7 @@ class llc (packet_base):
 
     self.parsed = True
 
-    if self.oui == '\0\0\0':
+    if self.oui == b'\0\0\0':
       self.next = ethernet.parse_next(self, self.eth_type, raw, self.length,
                                       allow_llc = False)
     else:
