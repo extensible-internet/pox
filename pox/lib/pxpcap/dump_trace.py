@@ -116,7 +116,7 @@ def launch (infile, verbose = False, max_length = 110,
   if force_show:
     _show_by_default = force_show
 
-  data = open(infile, "r").read()
+  data = open(infile, "rb").read()
   p = pxparse.PCapParser(callback=cb)
   p.feed(data)
 

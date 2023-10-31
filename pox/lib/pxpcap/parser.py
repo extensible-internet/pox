@@ -50,12 +50,13 @@ class PCapParser (object):
     magic = self._buf[0:4]
     header = self._buf[4:header_len]
 
-    if magic == "\xd4\xc3\xb2\xa1":
+    if magic == b"\xd4\xc3\xb2\xa1":
       self._prefix = "<"
-    elif magic == "\xa1\xb2\xc3\xd4":
+    elif magic == b"\xa1\xb2\xc3\xd4":
       self._prefix = ">"
     else:
-      raise RuntimeError("Wrong magic number")
+      mhex = " ".join(f"{x:02x}" for x in magic)
+      raise RuntimeError(f"Wrong magic number ({mhex})")
 
     major,minor = self._unpack("HH", header[:4])
     self.version = float("%s.%s" % (major,minor))
