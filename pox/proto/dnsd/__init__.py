@@ -60,15 +60,23 @@ sl
 id.server
 version.bind
 hostname.bind
-dnsscan.shadowserver.org
 www.cybergreen.net
-test.openresolver.com
 access-board.gov
 qq.com
 www.qq.com
 mz.gov.pl
 ip.parrotdns.com
+dnsscan.shadowserver.org
+test.openresolver.com
 cyberresilience.io
+rr-mirror.research.nawrocki.berlin
+dns-test.research.a10protects.com
+*.openresolvertest.net
+*.asertdnsresearch.com
+*.odns.m.dnsscan.top
+*.openresolve.rs
+*.openresolverproject.org
+*.open-resolver-scan.research.icann.org
 """.strip().lower().split())
 
 
@@ -186,6 +194,7 @@ class DNSServer (object):
 
   def __init__ (self, bind_ip=None, default_suffix=None, udp=True, doh=None,
                 bind_port=53, history=0, ignore=None):
+    self.wild_ignore = []
     if ignore is not None:
       ignore = set(ignore)
       if "." in ignore:
@@ -195,7 +204,9 @@ class DNSServer (object):
         if isinstance(s, str):
           return s.encode("ascii")
         return s
-      ignore = set((fixb(x) for x in ignore))
+      ignore = [fixb(x) for x in ignore]
+      self.wild_ignore = set(x[1:] for x in ignore if x.startswith(b"*"))
+      ignore = set(x for x in ignore if not x.startswith(b"*"))
     self.ignore = ignore
 
     self.history_length = history
@@ -413,9 +424,18 @@ class DNSServer (object):
       del self.history[0]
 
   def _do_question (self, sock, addr, data, req, q, res):
-    if q.name.lower() in self.ignore:
+    qnl = q.name.lower().strip()
+    if not qnl: # Empty query = automatic fail
       self.counter_ignore += 1
       return False
+    if qnl in self.ignore:
+      self.counter_ignore += 1
+      return False
+    # Definitely not the fastest algorithm we could use...
+    for w in self.wild_ignore:
+      if qnl.endswith(w):
+        self.counter_ignore += 1
+        return False
     if q.qclass != 1:
       # Only IN
       self.counter_badclass += 1
