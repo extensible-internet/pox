@@ -31,6 +31,7 @@ import pox.lib.packet as pkt
 from pox.lib.util import dpidToStr
 import pox.lib.pxpcap.parser as pxparse
 import pox.lib.pxpcap.writer as pxwriter
+import struct
 
 log = core.getLogger()
 
@@ -41,7 +42,31 @@ _show_by_default = None
 
 
 def cb (data, parser):
-  packet = pkt.ethernet(data)
+  # Should this be a class in the packet library?
+  if parser.lltype == 276: # Linux cooked capture v2
+    header = struct.unpack_from("!HHIHBB8s", data)
+    data = data[20:]
+    proto,_,iface,arphrd,packet_type,lladdrlen,lladdr = header
+    if arphrd==0xfffe: # ARPHRD_NONE
+      packet = pkt.ethernet().parse_next(None, proto, data)
+      if isinstance(packet, bytes):
+        # Very ugly!  packet library really does need a raw class...
+        class O:
+          def dump (self):
+            # hex dump?
+            return f"({len(self.data)} bytes)"
+        packet = O()
+        packet.data = data
+    elif arphrd==1: # Ethernet
+      packet = pkt.ethernet(data)
+    else:
+      # Adding support for some other types like GRE and maybe 802.2 shouldn't
+      # be hard, but I don't have example captures.
+      raise RuntimeError("Cooked link type not currently supported")
+  elif parser.lltype == 1: # Ethernet
+    packet = pkt.ethernet(data)
+  else:
+    raise RuntimeError("Link type not currently supported")
 
   #print "%04x %4s %s" % (d.effective_ethertype,len(d),d.dump())
 
