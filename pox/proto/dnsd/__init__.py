@@ -646,6 +646,17 @@ def https_alpn (alpn=False):
   DNSRecord.DEFAULT_ALPN = alpn
 
 
+@multi_instance
+def https_addr_hints (enable=False):
+  """
+  Configures the default for synthetic HTTPS record address hints
+
+  If specified with no argument, synthetic HTTPS records will have address
+  hints disabled.  Add --enable to turn them on.
+  """
+  DNSRecord.https_addr_hint = True if enable else False
+
+
 def launch (protocols = "udp", local_ip = None, local_port = None,
             history = 0, default_suffix = None, ignore = None):
   """
