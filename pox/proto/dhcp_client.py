@@ -20,6 +20,7 @@ from pox.core import core
 log = core.getLogger()
 
 import pox.lib.packet as pkt
+from pox.lib.interfaceio import PCapInterface
 
 from pox.lib.addresses import IPAddr, EthAddr
 from pox.lib.util import dpid_to_str, str_to_dpid
@@ -633,3 +634,49 @@ def launch (dpid, port, port_eth = None, name = None, __INSTANCE__ = None):
     core.register(n, client)
 
   core.call_when_ready(dhcpclient_init, ['openflow'])
+
+
+class PCapDHCPClient (DHCPClientBase):
+  """
+  Performs DHCP on an arbitrary Ethernet-like interface via pcap.
+  """
+  #TODO: Currently this captures ALL data to the port, which is surely not
+  #      what we want.  We should probably filter it, and we should probably
+  #      switch off capture altogether when we're not waiting for replies.
+  #      As it stands, this is only useful for testing.
+
+  def __init__ (self, iface_name, do_bind, **kw):
+    self.do_bind = do_bind
+    self.iface = PCapInterface(iface_name)
+    self.iface.add_listener(self._handle_RXData)
+    if 'port_eth' not in kw:
+      kw['port_eth'] = self.iface.eth_addr
+    super().__init__(**kw)
+
+  def _send_data (self, data):
+    self.iface.send(data)
+
+  def _handle_RXData (self, e):
+    parsed = pkt.ethernet(raw=e.data)
+    self._rx(parsed)
+
+  def _handle_dhcp_DHCPLeased (self, e):
+    super()._handle_dhcp_DHCPLeased(e)
+    if self.do_bind:
+      self.iface.ip_addr = e.lease.address
+      self.iface.netmask = e.lease.subnet_mask
+      if e.lease.routers:
+        self.iface.add_default_route(gateway = e.lease.routers[0])
+
+
+def client (iface, do_bind=False):
+  """
+  This runs a DHCP client on a given interface
+
+  Pass --do-bind if you want it to actually set up the interface.  Otherwise
+  we just lease it and log it.
+  """
+  def _handle_UpEvent (e):
+    client = core.registerNew(PCapDHCPClient, iface, do_bind)
+    client.state = client.INIT
+  core.add_listener(_handle_UpEvent)
