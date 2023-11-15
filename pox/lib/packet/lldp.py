@@ -451,14 +451,14 @@ class management_address (simple_tlv):
     self.object_identifier = b''
 
   def _parse_data (self, data):
-    asl = ord(data[0]) - 1
-    self.address_subtype = ord(data[1])
+    asl = data[0] - 1
+    self.address_subtype = data[1]
     self.address = data[2:2+asl]
 
-    self.interface_numbering_subtype = ord(data[2+asl])
+    self.interface_numbering_subtype = data[2+asl]
     self.interface_number = struct.unpack("!L",
                                       data[2+asl+1:2+asl+1+4])[0]
-    osl = ord(data[7+asl])
+    osl = data[7+asl]
     self.object_identifier = data[7+asl+1:7+asl+1+osl]
 
   def _data_len (self):
