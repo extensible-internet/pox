@@ -316,7 +316,7 @@ class dhcp(packet_base):
           if chaddr is None:chaddr = b'\x00' * 16
         fmt = '!BBBBIHHiiii16s64s128s4s'
         return struct.pack(fmt, self.op, self.htype, self.hlen,
-                           self.hops, self.xid, self.secs, self.flags,
+                           self.hops, self.xid, int(self.secs), self.flags,
                            IPAddr(self.ciaddr).toSigned(),
                            IPAddr(self.yiaddr).toSigned(),
                            IPAddr(self.siaddr).toSigned(),
