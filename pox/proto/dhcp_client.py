@@ -636,7 +636,37 @@ def launch (dpid, port, port_eth = None, name = None, __INSTANCE__ = None):
   core.call_when_ready(dhcpclient_init, ['openflow'])
 
 
-class PCapDHCPClient (DHCPClientBase):
+class LoggingHandlers:
+  """
+  Default implementations for DHCP events which just log things
+  """
+
+  @property
+  def _dhcplog (self):
+    if hasattr(self, 'log'): return self.log
+    return core.getLogger("dhcpc")
+
+  def _handle_dhcp_DHCPOffer (self, e):
+    offer = e
+    self._dhcplog.debug(f"Offer of {offer.address} from {offer.server}.")
+
+  def _handle_dhcp_DHCPOffers (self, e):
+    offer = e.accepted
+    if offer:
+      self._dhcplog.info(f"Accepting offer of {offer.address}"
+                         + f" from {offer.server}.")
+    else:
+      self._dhcplog.warning(f"Not accepting any of {len(e.offers)} offer(s).")
+
+  def _handle_dhcp_DHCPLeased (self, e):
+    self._dhcplog.info(f"Leased {e.lease.address} from "
+                       + f"{e.lease.server}.")
+
+  def _handle_dhcp_DHCPClientError (self, e):
+    self._dhcplog.error("DHCP client error")
+
+
+class PCapDHCPClient (DHCPClientBase, LoggingHandlers):
   """
   Performs DHCP on an arbitrary Ethernet-like interface via pcap.
   """
@@ -652,6 +682,7 @@ class PCapDHCPClient (DHCPClientBase):
     if 'port_eth' not in kw:
       kw['port_eth'] = self.iface.eth_addr
     super().__init__(**kw)
+    self.addListeners(self, prefix="dhcp")
 
   def _send_data (self, data):
     self.iface.send(data)
