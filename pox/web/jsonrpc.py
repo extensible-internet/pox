@@ -214,7 +214,7 @@ class JSONRPCHandler (SplitRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", len(response))
         self.end_headers()
-        self.wfile.write(response)
+        self.wfile.write(response.encode())
       except IOError as e:
         if e.errno == 32:
           if isinstance(orig, dict) and 'error' in orig:
