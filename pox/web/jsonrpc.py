@@ -170,7 +170,11 @@ class JSONRPCHandler (SplitRequestHandler):
       try:
         r = method(*params,**kw)
 
-        #TODO: jsonrpc version?
+        # If it hasn't been locally overriden, just echo back whatever
+        # version the request said it was.
+        if 'jsonrpc' in data:
+          if 'jsonrpc' not in r:
+            r['jsonrpc'] = data['jsonrpc']
 
         return r
       except:
