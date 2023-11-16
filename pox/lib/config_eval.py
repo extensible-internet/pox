@@ -110,7 +110,9 @@ def _eval_text (text, result_type=dict, dict_type=dict,
   r = dict_type()
 
   class ParseError (RuntimeError):
-    pass
+    @property
+    def message (self):
+      return self.args[0]
 
   DIGITS = set("0123456789")
   HEX = set("abcdefABCDEF0123456789")
