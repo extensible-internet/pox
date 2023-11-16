@@ -102,6 +102,7 @@ class JSONRPCHandler (SplitRequestHandler):
     # Maybe the following arg-adding feature should just be part of
     # SplitRequestHandler?
 
+    if self.args is None: self.args = {}
     for k,v in self.args.items():
       setattr(self, "_arg_" + k, v)
 
