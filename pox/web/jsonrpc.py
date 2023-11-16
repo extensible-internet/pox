@@ -365,3 +365,35 @@ def make_error (msg = "Unknown Error",
     e['data'] = data
   r = {'error':e}
   return r
+
+
+
+class ExampleHandler (JSONRPCHandler):
+  """
+  A simple example for JSON-RPC
+  """
+
+  def _exec_subtract (self, minuend, subtrahend):
+    """
+    Subtract numbers
+
+    This is compatible with an example from the JSON-RPC 2.0 spec.
+    """
+    return dict(result=minuend - subtrahend)
+
+  def _exec_log (self, message):
+    log.info("RPC: %s", str(message))
+
+
+def example (no_cookieguard=False):
+  """
+  Sets up the simple ExampleHandler
+  """
+  class MyExampleHandler (ExampleHandler):
+    pass
+  if no_cookieguard:
+    MyExampleHandler.pox_cookieguard = False
+
+  def _launch ():
+    core.WebServer.set_handler("/json-rpc/", MyExampleHandler)
+  core.call_when_ready(_launch, ["WebServer"], name = "jsonrpc:example")
