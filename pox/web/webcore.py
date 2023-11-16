@@ -101,6 +101,18 @@ def cgi_parse_header (s):
 
 
 
+# FieldStorage is problematic, perhaps in general, and definitely in Python3.
+# Perhaps most significantly because it's deprecated.  But it's also got
+# string/bytes issues.  We try to hack our way around those here, but we've
+# got to come up with a more permanent solution by Python 3.13.
+import tempfile
+class cgi_FieldStorage (cgi.FieldStorage):
+  def make_file (self):
+    # I think this should always be binary?
+    return tempfile.TemporaryFile("wb+")
+
+
+
 import weakref
 
 class ShutdownHelper (object):
@@ -204,7 +216,7 @@ class POXCookieGuardMixin (object):
     if self.command != "POST": return
 
     # Read rest of input to avoid connection reset
-    cgi.FieldStorage( fp = self.rfile, headers = self.headers,
+    cgi_FieldStorage( fp = self.rfile, headers = self.headers,
                       environ={ 'REQUEST_METHOD':'POST' } )
 
   def _get_cookieguard_cookie (self):
@@ -1128,7 +1140,7 @@ class InternalContentHandler (SplitRequestHandler):
       self.send_error(400, "Expected form data")
       return
 
-    data = cgi.FieldStorage( fp = self.rfile, headers = self.headers,
+    data = cgi_FieldStorage( fp = self.rfile, headers = self.headers,
                              environ={ 'REQUEST_METHOD':'POST' } )
     if not data:
       self.send_error(400, "Expected upload data")
@@ -1174,7 +1186,7 @@ class FileUploadHandler (SplitRequestHandler):
       return
     #query = cgi_parse_multipart(self.rfile, params)
     #data = query.get("upload")
-    data = cgi.FieldStorage( fp = self.rfile, headers = self.headers,
+    data = cgi_FieldStorage( fp = self.rfile, headers = self.headers,
                              environ={ 'REQUEST_METHOD':'POST' } )
     if not data or "upload" not in data:
       self.send_error(400, "Expected upload data")
