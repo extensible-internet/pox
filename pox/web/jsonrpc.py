@@ -89,6 +89,24 @@ class JSONRPCHandler (SplitRequestHandler):
 
   ERR_METHOD_ERROR = 99 # We use this for errors in methods
 
+  RPC_TO_HTTP_ERR = {
+    ERR_PARSE_ERROR      : 500,
+    ERR_INVALID_REQUEST  : 400,
+    ERR_METHOD_NOT_FOUND : 404,
+    ERR_INVALID_PARAMS   : 500,
+    ERR_INTERNAL_ERROR   : 500,
+  }
+
+  RPC_TO_TEXT_ERR = {
+    ERR_PARSE_ERROR      : 'ERR_PARSE_ERROR',
+    ERR_INVALID_REQUEST  : 'ERR_INVALID_REQUEST',
+    ERR_METHOD_NOT_FOUND : 'ERR_METHOD_NOT_FOUND',
+    ERR_INVALID_PARAMS   : 'ERR_INVALID_PARAMS',
+    ERR_INTERNAL_ERROR   : 'ERR_INTERNAL_ERROR',
+    ERR_SERVER_ERROR     : 'ERR_SERVER_ERROR',
+    ERR_METHOD_ERROR     : 'ERR_METHOD_ERROR',
+  }
+
   ERROR_XLATE = {
     ERR_PARSE_ERROR      : (1, QX_ERR_ILLEGAL_SERVICE), # Nonsense
     ERR_METHOD_NOT_FOUND : (1, QX_ERR_METHOD_NOT_FOUND),
@@ -96,7 +114,12 @@ class JSONRPCHandler (SplitRequestHandler):
     ERR_SERVER_ERROR     : (),
   }
 
+  # Use Qooxdoo mode
   _qx = False
+
+  # Use HTTP status codes?
+  # True, False, or None (only for JSON-RPC 1.0)
+  _use_http_codes = None
 
   def _init (self):
     # Maybe the following arg-adding feature should just be part of
@@ -110,6 +133,8 @@ class JSONRPCHandler (SplitRequestHandler):
     self.auth_realm = self.args.get('auth_realm', "JSONRPC")
 
     self._qx = self.args.get('qx', self._qx)
+    self._use_http_codes = self.args.get('use_http_codes',
+                                         self._use_http_codes)
 
   def _send_auth_header (self):
     if self.auth_function:
@@ -208,18 +233,43 @@ class JSONRPCHandler (SplitRequestHandler):
     if 'pretty' in self.path:
       dumps_opts = {'sort_keys':True, 'indent':2}
 
-    def reply (response):
+    def reply (response, version=None):
+      code = 200
+      message = "OK"
+
+      # Use HTTP codes?
+      http_codes = self._use_http_codes
+      if http_codes is None: # Only for 1.0
+        http_codes = version is None
+
       orig = response
       #if not isinstance(response, basestring):
       if isinstance(response, list):
+        # For batched mode, don't bother with the HTTP status code (which I
+        # think is a bad idea under any circumstance, but whatever).
+        # (We *do* still send 204 if none returned anything.)
         for r in response: self._translate_error(r)
-      else:
+      elif response is not None:
+        if http_codes:
+          if response.get('error'):
+            ocode = response['error'].get('code')
+            code = self.RPC_TO_HTTP_ERR.get(ocode, 500)
+            message = self.RPC_TO_TEXT_ERR.get(ocode, "Unknown error")
+
         self._translate_error(response)
-      response = json.dumps(response, default=str, **dumps_opts)
-      response = response.strip()
-      if len(response) and not response.endswith("\n"): response += "\n"
+
+      if response is None:
+        response = ''
+        if http_codes:
+          code = 204
+          message = "No Content"
+      else:
+        response = json.dumps(response, default=str, **dumps_opts)
+        response = response.strip()
+        if len(response) and not response.endswith("\n"): response += "\n"
+
       try:
-        self.send_response(200, "OK")
+        self.send_response(code, message)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", len(response))
         self.end_headers()
@@ -263,17 +313,26 @@ class JSONRPCHandler (SplitRequestHandler):
       single = True
 
     responses = []
+    rversion = False
+    mixed_warn = False
 
     for req in data:
       response = self._handle(req) # Should never raise an exception
       if response is ABORT:
         return
+      version = req.get('jsonrpc')
+      if rversion is not False and version != rversion:
+        if not mixed_warn:
+          mixed_warn = True
+          log.warning("Batch-mode RPCs with mixed versions!")
+      rversion = version
+
       if 'id' in req or 'error' in response:
         response['id'] = req.get('id')
         responses.append(response)
         if 'error' in response:
-          if response.get('jsonrpc') == '2.0':
-            response.pop('result')
+          if version == '2.0':
+            response.pop('result', None)
           else:
             response['result'] = None
         elif 'result' not in response:
@@ -281,12 +340,12 @@ class JSONRPCHandler (SplitRequestHandler):
           response['result'] = None
 
     if len(responses) == 0:
-      responses = ''
+      responses = None
     else:
       if single:
         responses = responses[0]
 
-    reply(responses)
+    reply(responses, version=rversion)
 
 
 class QXJSONRPCHandler (JSONRPCHandler):
