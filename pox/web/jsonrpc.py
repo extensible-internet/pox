@@ -170,6 +170,10 @@ class JSONRPCHandler (SplitRequestHandler):
       try:
         r = method(*params,**kw)
 
+        # If they don't care about the return value, don't make them actually
+        # return a dict.
+        if r is None: r = {}
+
         # If it hasn't been locally overriden, just echo back whatever
         # version the request said it was.
         if 'jsonrpc' in data:
@@ -267,6 +271,14 @@ class JSONRPCHandler (SplitRequestHandler):
       if 'id' in req or 'error' in response:
         response['id'] = req.get('id')
         responses.append(response)
+        if 'error' in response:
+          if response.get('jsonrpc') == '2.0':
+            response.pop('result')
+          else:
+            response['result'] = None
+        elif 'result' not in response:
+          # Have 'id' but no result...
+          response['result'] = None
 
     if len(responses) == 0:
       responses = ''
