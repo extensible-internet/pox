@@ -301,8 +301,19 @@ class JSONRPCHandler (SplitRequestHandler):
       data = self.rfile.read(int(l))
     try:
       data = json.loads(data)
-    except:
-      response = {}
+    except Exception:
+      # This is a tricky case.  We don't really know how to respond, because
+      # we don't know the version, because we didn't parse the request
+      # successfully.  So we sort of split the difference.  We add the
+      # version 2.0 field to the response, with the idea that some 2.0
+      # clients might need it, but 1.0 clients probably won't notice.
+      # But we don't pass 'version' into reply(), so we may get HTTP error
+      # codes in some cases that we normally wouldn't.  The worst thing
+      # that can probably happen due to that is that the client isn't
+      # expecting it and throws an exception, though, which seems fine
+      # since if we've got a parse error, things have already gone
+      # very, very wrong (and its probably their fault anyway).
+      response = {'jsonrpc': '2.0'}
       response['error'] = {'code':self.ERR_PARSE_ERROR,
                            'message':'Parse error'}
       return reply(response)
