@@ -55,7 +55,7 @@ import os
 import socket
 import posixpath
 import urllib.request, urllib.parse, urllib.error
-import cgi
+import pox.web.fieldstorage as cgi
 try:
   # Modern Python
   from html import escape as cgi_escape
