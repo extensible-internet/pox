@@ -50,6 +50,7 @@ from .authentication import BasicAuthMixin
 from pox.core import core
 from pox.lib.revent import Event, EventMixin
 
+import json
 import os
 import socket
 import posixpath
@@ -1132,19 +1133,27 @@ class InternalContentHandler (SplitRequestHandler):
 
   def do_POST (self):
     mime,params = cgi_parse_header(self.headers.get('content-type'))
+    data = None
     if mime == "application/x-www-form-urlencoded":
       pass
     elif mime == 'multipart/form-data':
       pass
+    elif mime == 'application/json':
+      length = self.headers.get("Content-Length")
+      if length:
+        length = int(length)
+        if length <= 1024*1024: # Limit size to 1 MiB
+          data = json.loads(self.rfile.read(length))
     else:
       self.send_error(400, "Expected form data")
       return
 
-    data = cgi_FieldStorage( fp = self.rfile, headers = self.headers,
-                             environ={ 'REQUEST_METHOD':'POST' } )
-    if not data:
-      self.send_error(400, "Expected upload data")
-      return
+    if data is None:
+      data = cgi_FieldStorage( fp = self.rfile, headers = self.headers,
+                               environ={ 'REQUEST_METHOD':'POST' } )
+      if not data:
+        self.send_error(400, "Expected upload data")
+        return
 
     self.do_response(include_body=True, prefix="POST", data=data)
 
