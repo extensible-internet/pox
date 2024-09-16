@@ -351,7 +351,7 @@ class POXCore (EventMixin):
     log.info("Down.")
     #logging.shutdown()
     self.quit_condition.acquire()
-    self.quit_condition.notifyAll()
+    self.quit_condition.notify_all()
     core.quit_condition.release()
 
   def _get_python_version (self):
