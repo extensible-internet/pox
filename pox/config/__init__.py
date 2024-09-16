@@ -165,7 +165,8 @@ def launch (file, __INSTANCE__=None):
   lineno = 0
   ifstack = IfStack()
   try:
-    for line in open(file, "r"):
+    fp = open(file, "r")
+    for line in fp:
       lineno += 1
       line = line.lstrip().replace("\r","\n").rstrip("\n")
       if line.startswith("#"): continue
@@ -284,6 +285,8 @@ def launch (file, __INSTANCE__=None):
     l.exception("On line %s of config file '%s'" % (lineno,file))
     os._exit(1)
     #print "Error on line %s of config file '%s'." % (lineno,file)
+  finally:
+    fp.close()
 
   variables.clear()
 
