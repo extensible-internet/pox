@@ -394,9 +394,11 @@ class WebsocketHandler (SplitRequestHandler, object):
     return True
 
   def send (self, msg):
-    if isinstance(msg, dict): msg = json.dumps(msg)
+    msgtype = self.WS_TEXT
+    if isinstance(msg, bytes): msgtype = self.WS_BINARY
+    if isinstance(msg, dict): msg = json.dumps(msg).encode()
     try:
-      msg = self._frame(self.WS_TEXT, msg.encode())
+      msg = self._frame(msgtype, msg)
       self._send_real(msg)
     except Exception as e:
       log.exception("While sending")
