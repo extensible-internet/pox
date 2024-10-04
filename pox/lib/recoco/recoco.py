@@ -145,8 +145,11 @@ class Task (BaseTask):
   def run (self):
     g = self.target(*self.args, **self.kwargs)
     x = g.send(None)
-    while True:
-      x = g.send((yield x))
+    try:
+      while True:
+        x = g.send((yield x))
+    except StopIteration:
+      pass
 
   def __str__ (self):
     return "<%s %s tid:%s>" % (type(self).__name__,
